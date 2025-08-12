@@ -274,9 +274,9 @@ const getProfile = async (author, cid, options = {}) => {
     ]);
 
     result.activity = {
-      likes: await processLikes(likes),
-      comments: await processComments(comments),
-      shares: await processShares(shares)
+      likes: await processLikes(likes, cid),
+      comments: await processComments(comments, cid),
+      shares: await processShares(shares, cid)
     };
   }
 
@@ -326,7 +326,7 @@ const getProfile = async (author, cid, options = {}) => {
 
 
 // Process likes with MongoDB aggregation pipeline
-async function processLikes(items) {
+async function processLikes(items, cid) {
   const pipeline = [
     { $match: { _id: { $in: items.map(item => item._id) } } },
     { $sort: { created_at: -1 } },
@@ -366,7 +366,7 @@ async function processLikes(items) {
               from: 'profiles',
               let: { authorId: '$author' },
               pipeline: [
-                { $match: { $expr: { $eq: ['$author', '$$authorId'] } } },
+                { $match: { $expr: { $eq: ['$author', '$$authorId'] }, cid } },
                 { $project: { author: 1, name: 1, picture: 1, family_name: 1, locale: 1, given_name: 1 } }
               ],
               as: 'authorProfile'
@@ -427,7 +427,7 @@ async function processLikes(items) {
 }
 
 // Process comments with MongoDB aggregation pipeline
-async function processComments(items) {
+async function processComments(items, cid) {
   const pipeline = [
     { $match: { _id: { $in: items.map(item => item._id) } } },
     { $sort: { created_at: -1 } },
@@ -449,7 +449,7 @@ async function processComments(items) {
         from: 'profiles',
         let: { authorId: '$author' },
         pipeline: [
-          { $match: { $expr: { $eq: ['$author', '$$authorId'] } } },
+          { $match: { $expr: { $eq: ['$author', '$$authorId'] }, cid } },
           { $project: { author: 1, name: 1, picture: 1, family_name: 1, locale: 1, given_name: 1 } }
         ],
         as: 'authorProfile'
@@ -493,7 +493,7 @@ async function processComments(items) {
 }
 
 // Process shares with MongoDB aggregation pipeline
-async function processShares(items) {
+async function processShares(items, cid) {
   const pipeline = [
     { $match: { _id: { $in: items.map(item => item._id) } } },
     { $sort: { created_at: -1 } },
@@ -821,8 +821,11 @@ const getMoreComments = async (author, cid, query = null) => {
     {
       $lookup: {
         from: 'profiles',
-        localField: 'author',
-        foreignField: 'author',
+        let: { authorId: '$author' },
+        pipeline: [
+          { $match: { $expr: { $eq: ['$author', '$$authorId'] }, cid } },
+          { $project: { author: 1, name: 1, picture: 1, family_name: 1, locale: 1, given_name: 1 } }
+        ],
         as: 'authorData'
       }
     },
@@ -934,7 +937,7 @@ const getMoreLikes = async (author, cid, query = null) => {
               from: 'profiles',
               let: { authorId: '$author' },
               pipeline: [
-                { $match: { $expr: { $eq: ['$author', '$$authorId'] } } },
+                { $match: { $expr: { $eq: ['$author', '$$authorId'] }, cid } },
                 { $project: { author: 1, name: 1, picture: 1, family_name: 1, locale: 1, given_name: 1 } }
               ],
               as: 'authorData'
@@ -998,7 +1001,7 @@ const getMoreLikes = async (author, cid, query = null) => {
       created_at: item.comment.created_at,
       madeAt: item.created_at,
       author: item.comment.author || null,
-      referer: item.comment.postData ? { // Changed from 'post' to 'referer'
+      referer: item.comment.postData ? { 
         ...item.comment.postData,
         author: {
           author: profile.author,

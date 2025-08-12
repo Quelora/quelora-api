@@ -298,8 +298,8 @@ clientSchema.methods.validateModeration = function(moderationConfig) {
     throw new Error('Moderation prompt cannot exceed 5000 characters');
   }
 
-  if (moderationConfig.configJson && !this.isValidJson(moderationConfig.configJson)) {
-    throw new Error('configJson must be valid JSON');
+  if (moderationConfig.configJson && typeof moderationConfig.configJson !== 'object') {
+    throw new Error('configJson must be an object');
   }
 };
 
@@ -313,8 +313,8 @@ clientSchema.methods.validateToxicity = function(toxicityConfig) {
     throw new Error('apiKeyCipher must be a string');
   }
 
-  if (toxicityConfig.configJson && !this.isValidJson(toxicityConfig.configJson)) {
-    throw new Error('configJson must be valid JSON');
+  if (toxicityConfig.configJson && typeof toxicityConfig.configJson !== 'object') {
+    throw new Error('configJson must be an object');
   }
 };
 
@@ -328,8 +328,8 @@ clientSchema.methods.validateTranslation = function(translationConfig) {
     throw new Error('apiKeyCipher must be a string');
   }
 
-  if (translationConfig.configJson && !this.isValidJson(translationConfig.configJson)) {
-    throw new Error('configJson must be valid JSON');
+  if (translationConfig.configJson && typeof translationConfig.configJson !== 'object') {
+    throw new Error('configJson must be an object');
   }
 };
 
