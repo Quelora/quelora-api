@@ -1,4 +1,5 @@
 const Profile = require('../models/Profile');
+const webPush = require('web-push');
 const { addNotificationJob } = require('../services/queueService');
 const profileService = require('../services/profileService');
 
@@ -226,3 +227,16 @@ exports.notificationConfig= async (req, res) => {
     `
   });
 }
+
+exports.generateVapidKeys = async (req, res) => {
+  try {
+    const vapidKeys = webPush.generateVAPIDKeys();
+    res.json({
+      publicKey: vapidKeys.publicKey,
+      privateKey: vapidKeys.privateKey
+    });
+  } catch (error) {
+    console.error('Error generating VAPID keys:', error);
+    res.status(500).json({ error: 'Failed to generate VAPID keys' });
+  }
+};

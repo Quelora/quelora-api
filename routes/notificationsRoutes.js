@@ -14,5 +14,7 @@ router.post('/validate', [globalRateLimiter, strictRateLimiter, validateClientHe
 router.post('/send', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], notificationsController.sendNotification);
 router.get('/search', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], notificationsController.searchAuthors);
 router.get('/config.json', [globalRateLimiter, strictRateLimiter], notificationsController.notificationConfig);
- 
+router.get('/generate-vapid-keys', [globalRateLimiter, strictRateLimiter], notificationsController.generateVapidKeys);
+
+
 module.exports = router;    
