@@ -53,7 +53,7 @@ async function moderateService(cid, text, config = null) {
     // Preparar el prompt
     let prompt = clientConfig.prompt || generateModerationPrompt(text);
     if (clientConfig.prompt) {
-        prompt = clientConfig.prompt.replace(/\${text}/g, text);
+        prompt = clientConfig.prompt.replace(/\{text\}/g, text);
     }
 
     // Validar configJson si existe

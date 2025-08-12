@@ -70,6 +70,10 @@ web_modules/
 .env.*
 !.env.example
 
+#MaxMind DB
+db/*
+!db/.gitkeep
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

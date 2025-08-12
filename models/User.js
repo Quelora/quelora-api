@@ -260,6 +260,11 @@ clientSchema.methods.validateLogin = function(loginConfig) {
     throw new Error('Base URL must be a valid URL');
   }
 
+  // Validación para jwtSecret
+  if (loginConfig.jwtSecret && loginConfig.jwtSecret.length > 100) {
+    throw new Error('JWT Secret cannot exceed 100 characters');
+  }
+
   if (loginConfig.providers && !Array.isArray(loginConfig.providers)) {
     throw new Error('Providers must be an array');
   }
@@ -433,6 +438,11 @@ clientSchema.pre('save', function(next) {
       }
     }
     
+      if (config.login?.jwtSecret && config.login.jwtSecret !== '') {
+      config.login.jwtSecretCipher = encrypt(config.login.jwtSecret, ENCRYPTION_KEY);
+      config.login.jwtSecret = undefined; //Remove plaintext key
+    }
+
     this.markModified('config');
   }
   next();
@@ -455,22 +465,27 @@ clientSchema.set('toJSON', {
       for (const provider of Object.values(ret.config.login.providerDetails)) {
         if (provider.clientSecretCipher) {
           provider.clientSecret = decrypt(provider.clientSecretCipher, ENCRYPTION_KEY);
-          provider.clientSecretCipher = undefined; // Optional: remove cipher
+          provider.clientSecretCipher = undefined;
         }
       }
     }
     
+    if (ret.config?.login?.jwtSecretCipher) {
+      ret.config.login.jwtSecret = decrypt(ret.config.login.jwtSecretCipher, ENCRYPTION_KEY);
+      ret.config.login.jwtSecretCipher = undefined;
+    }
+
     const modulesToDecrypt = ['moderation', 'toxicity', 'translation', 'geolocation'];
     for (const moduleName of modulesToDecrypt) {
       if (ret.config?.[moduleName]?.apiKeyCipher) {
         ret.config[moduleName].apiKey = decrypt(ret.config[moduleName].apiKeyCipher, ENCRYPTION_KEY);
-        ret.config[moduleName].apiKeyCipher = undefined; // Optional: remove cipher
+        ret.config[moduleName].apiKeyCipher = undefined;
       }
     }
     
     if (ret.vapid?.privateKeyCipher) {
       ret.vapid.privateKey = decrypt(ret.vapid.privateKeyCipher, ENCRYPTION_KEY);
-      ret.vapid.privateKeyCipher = undefined; // Remove cipher
+      ret.vapid.privateKeyCipher = undefined;
     }
 
     return ret;
@@ -605,6 +620,12 @@ userSchema.methods.decryptConf = function(conf) {
       decryptedConf[moduleName].apiKey = decrypt(decryptedConf[moduleName].apiKeyCipher, ENCRYPTION_KEY);
       decryptedConf[moduleName].apiKeyCipher = undefined;
     }
+  }
+
+  // Decrypt jwtSecret in modules
+  if (decryptedConf.login?.jwtSecretCipher) {
+    decryptedConf.login.jwtSecret = decrypt(decryptedConf.login.jwtSecretCipher, ENCRYPTION_KEY);
+    decryptedConf.login.jwtSecretCipher = undefined;
   }
   
   return decryptedConf;

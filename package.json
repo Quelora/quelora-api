@@ -24,6 +24,7 @@
     "google-auth-library": "^9.15.1",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
+    "maxmind": "^5.0.0",
     "mongoose": "^8.9.7",
     "ngeohash": "^0.6.3",
     "node-cron": "^3.0.3",
