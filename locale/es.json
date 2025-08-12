@@ -1,0 +1,34 @@
+{
+  "new_follower": {
+    "title": "Nuevo seguidor",
+    "message": "Tienes un nuevo seguidor: {name|bold}"
+  },
+  "new_follow_request": {
+    "title": "Nueva solicitud de seguidor",
+    "message": "{name|bold} solicitó seguirte"
+  },
+  "new_like": {
+    "title": "Nuevo Me gusta",
+    "message": "A {name|bold} le gustó tu publicación"
+  },
+  "new_comment": {
+    "title": "Nuevo comentario",
+    "message": "{name|bold} comentó en tu publicación: {comment}"
+  },
+  "new_comment_followers": {
+    "title": "Nuevo comentario",
+    "message": "{name|bold} comentó la publicación: {post}"
+  },
+  "post_mentioned": {
+    "title": "Nueva mención",
+    "message": "{name|bold} te mencionó en una publicación"
+  },
+  "welcome_message": {
+    "title": "Bienvenido",
+    "message": "¡Bienvenido a la comunidad, {name|bold}!"
+  },
+  "follow_request_approved": {
+    "title": "Solicitud aprobada",
+    "message": "¡{name|bold} aprobó tu solicitud de seguimiento!"
+  }
+}

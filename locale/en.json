@@ -1,0 +1,34 @@
+{
+  "new_follower": {
+    "title": "New follower",
+    "message": "You have a new follower: {name|bold}"
+  },
+  "new_follow_request": {
+    "title": "New follower request",
+    "message": "{name|bold} request to follow you"
+  },
+  "new_like": {
+    "title": "New like",
+    "message": "{name|bold} liked your post"
+  },
+  "new_comment": {
+    "title": "New comment",
+    "message": "{name|bold} commented on your post: {comment}"
+  },
+  "new_comment_followers": {
+    "title": "Nuevo comentario",
+    "message": "{name|bold} commented on the post: {post}"
+  },
+  "post_mentioned": {
+    "title": "New mention",
+    "message": "{name|bold} mentioned you in a post"
+  },
+  "welcome_message": {
+    "title": "Welcome",
+    "message": "Welcome to the community, {name|bold}!"
+  },
+  "follow_request_approved": {
+    "title": "Request approved",
+    "message": "{name|bold} approved your follow request!"
+  }
+}
