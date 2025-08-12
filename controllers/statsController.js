@@ -7,6 +7,7 @@ const ProfileComment = require('../models/ProfileComment');
 const ProfileLike = require('../models/ProfileLike');
 const ProfileShare = require('../models/ProfileShare');
 
+
 exports.getSystemStats = async (req, res, next) => {
   try {
     const user = req.user;
@@ -17,7 +18,7 @@ exports.getSystemStats = async (req, res, next) => {
       });
     }
 
-    const { cid } = req.body;
+    const { cid } = req.query;
 
     // Determinar los cids a usar
     let cidsToUse = [];
@@ -36,7 +37,7 @@ exports.getSystemStats = async (req, res, next) => {
 
     // Manejo de fechas
     let dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom) : null;
-    let dateTo = req.query.dateTo ? req.query.dateTo ? new Date(req.query.dateTo) : new Date() : new Date();
+    let dateTo = req.query.dateTo ? new Date(req.query.dateTo) : new Date();
 
     // Validar y ajustar el rango de fechas
     const now = new Date();
@@ -54,7 +55,7 @@ exports.getSystemStats = async (req, res, next) => {
     }
 
     // Filtro para posts y otras colecciones
-    const baseFilter = cidsToUse.length > 0 ? { cid: { $in: cidsToUse } } : {};
+    const baseFilter = { cid: { $in: cidsToUse } };
     const postFilter = {
       ...baseFilter,
       created_at: { $gte: dateFrom, $lte: dateTo }
@@ -80,7 +81,7 @@ exports.getSystemStats = async (req, res, next) => {
         }
       },
       { $unwind: '$post' },
-      { $match: { ...interactionFilter, 'post.cid': { $in: cidsToUse.length > 0 ? cidsToUse : await Post.distinct('cid') } } },
+      { $match: { ...interactionFilter, 'post.cid': { $in: cidsToUse } } },
       { $count: 'totalComments' }
     ]);
 
@@ -98,7 +99,7 @@ exports.getSystemStats = async (req, res, next) => {
       {
         $match: {
           ...interactionFilter,
-          'post.cid': { $in: cidsToUse.length > 0 ? cidsToUse : await Post.distinct('cid') },
+          'post.cid': { $in: cidsToUse },
           entity_type: 'post'
         }
       },
@@ -116,7 +117,7 @@ exports.getSystemStats = async (req, res, next) => {
         }
       },
       { $unwind: '$post' },
-      { $match: { ...interactionFilter, 'post.cid': { $in: cidsToUse.length > 0 ? cidsToUse : await Post.distinct('cid') } } },
+      { $match: { ...interactionFilter, 'post.cid': { $in: cidsToUse } } },
       { $count: 'totalShares' }
     ]);
 
@@ -124,7 +125,7 @@ exports.getSystemStats = async (req, res, next) => {
     const statsByHour = await Stats.aggregate([
       {
         $match: {
-          ...(cidsToUse.length > 0 && { cid: { $in: cidsToUse } }),
+          cid: { $in: cidsToUse },
           timestamp: { $gte: dateFrom, $lte: dateTo }
         }
       },
@@ -162,9 +163,8 @@ exports.getSystemStats = async (req, res, next) => {
         from: dateFrom.toISOString(),
         to: dateTo.toISOString()
       },
-      ...(cid && { cid })
+      cids: cidsToUse // Siempre devolver los cids usados
     });
-
   } catch (error) {
     console.error('❌ Error fetching system stats:', error);
     res.status(500).json({
