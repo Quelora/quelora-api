@@ -1,4 +1,4 @@
-// app/services/queueService.js
+// app/services/pushService.js
 // Notification Queue Service
 // Handles web push notification delivery with retries, rate limiting, and subscription management
 

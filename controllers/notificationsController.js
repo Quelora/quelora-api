@@ -1,6 +1,6 @@
 const Profile = require('../models/Profile');
 const webPush = require('web-push');
-const { addNotificationJob } = require('../services/queueService');
+const { addNotificationJob } = require('../services/pushService');
 const profileService = require('../services/profileService');
 
 exports.subscribeProfile = async (req, res) => {

@@ -88,7 +88,7 @@
 │   ├── profileService.js
 │   ├── puppeteerService.js
 │   ├── pushNotificationService.js
-│   ├── queueService.js
+│   ├── pushService.js
 │   ├── statsService.js
 │   ├── toxicityService.js
 │   └── translateService.js

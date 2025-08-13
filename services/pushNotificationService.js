@@ -1,4 +1,4 @@
-const { notificationQueue } = require('./queueService');
+const { notificationQueue } = require('./pushService');
 const Profile = require('../models/Profile');
 const ProfileFollower = require('../models/ProfileFollower');
 const { getLocalizedMessage } = require('../services/i18nService');
