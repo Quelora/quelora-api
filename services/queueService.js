@@ -33,13 +33,13 @@ const notificationQueue = new Queue('notifications', {
 
 // Worker processing logic for notifications
 const notificationWorker = new Worker('notifications', async job => {
-  const { author, title, body, data } = job.data;
+  const { cid, author, title, body, data } = job.data;
 
   try {
-    const profile = await Profile.findOne({ author });
+    const profile = await Profile.findOne({ author, cid });
 
     if (!profile || !profile.cid || !profile.pushSubscriptions || profile.pushSubscriptions.length === 0) {
-      console.warn(`No active subscriptions or missing cid for user ${author}`);
+      console.warn(`No active subscriptions or missing cid for user ${author} client ${cid}`);
       return;
     }
 
@@ -127,9 +127,10 @@ if (process.env.WORKER_MONITOR_INTERVAL_MS) {
 
 module.exports = {
   notificationQueue,
-  addNotificationJob: async (author, title, body, data = {}) => {
-    const jobId = `notif:${author}:${Date.now()}:${randomUUID()}`;
+  addNotificationJob: async (cid, author, title, body, data = {}) => {
+    const jobId = `notif:${cid}:${author}:${Date.now()}:${randomUUID()}`;
     return notificationQueue.add('send-notification', { 
+      cid,
       author, 
       title, 
       body, 

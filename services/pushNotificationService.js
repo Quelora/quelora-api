@@ -14,7 +14,7 @@ const { randomUUID } = require('crypto');
  * @param {string} type - Notification type (e.g., 'follow', 'like')
  * @returns {Promise<void>}
  */
-async function sendPushNotificationsToFollowers(author, title, message, data = {}, extra = {}, type = 'default') {
+async function sendPushNotificationsToFollowers(cid, author, title, message, data = {}, extra = {}, type = 'default') {
   if (!author || !title || !message) {
     throw new Error('Author, title, and message are required');
   }
@@ -23,7 +23,7 @@ async function sendPushNotificationsToFollowers(author, title, message, data = {
     throw new Error('Data must be a plain object');
   }
 
-  const profile = await Profile.findOne({ author });
+  const profile = await Profile.findOne({ author, cid });
   if (!profile) {
     throw new Error(`Profile not found for author ${author}`);
   }
@@ -69,11 +69,12 @@ async function sendPushNotificationsToFollowers(author, title, message, data = {
  * @param {string} type - Notification type (e.g., 'follow', 'like')
  * @returns {Promise<void>}
  */
-async function sendPushNotification(author, title, message, data = {}, extra = {}, type = 'default') {
+async function sendPushNotification(cid, author, title, message, data = {}, extra = {}, type = 'default') {
   if (!author || !title || !message) {
     throw new Error('Author, title, and message are required');
   }
   
+
   const receiver = await Profile.findOne({ author });
 
   title = await getLocalizedMessage(title, receiver.locale ?? 'en');
@@ -83,7 +84,7 @@ async function sendPushNotification(author, title, message, data = {}, extra = {
     throw new Error('Data must be a plain object');
   }
 
-  const profile = await Profile.findOne({ author });
+  const profile = await Profile.findOne({ author, cid });
   if (!profile || !profile.pushSubscriptions || profile.pushSubscriptions.length === 0) {
     console.warn(`No active subscriptions for user ${author}`);
     return;

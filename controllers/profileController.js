@@ -189,7 +189,8 @@ exports.followUser = async (req, res, next) => {
       
       await ProfileFollowRequest.create({ profile_id: currentProfile._id, target_id: profileToFollow._id, status: 'pending', created_at: Date.now() });
 
-      await sendPushNotification( profileToFollow.author,
+      await sendPushNotification( cid,
+                                  profileToFollow.author,
                                   'new_follow_request.title',
                                   'new_follow_request.message',
                                   { name: currentProfile.name },
@@ -215,7 +216,8 @@ exports.followUser = async (req, res, next) => {
       await profileService.deleteProfileCache(cid, currentProfile.author);
       await profileService.deleteProfileCache(cid, profileToFollow.author);
 
-      await sendPushNotification( profileToFollow.author, 
+      await sendPushNotification( cid,
+                                  profileToFollow.author, 
                                   'new_follower.title', 
                                   'new_follower.message', 
                                   { name: currentProfile.name }, 
@@ -308,6 +310,7 @@ exports.approveFollowRequest = async (req, res, next) => {
       await followRequest.save();
 
       await sendPushNotification(
+        cid,
         followRequest.profile_id.author,
         'follow_request_approved.title',
         'follow_request_approved.message',

@@ -52,7 +52,7 @@ exports.getUsersByClient = async (req, res, next) => {
     // Execute queries
     const [users, totalUsers] = await Promise.all([
       Profile.find(query)
-        .select('cid author name given_name family_name picture locale bookmarksCount commentsCount followersCount followingCount likesCount sharesCount settings pushSubscriptions location geohash lastActivityViewed created_at updated_at')
+        .select('cid author name given_name family_name email picture locale bookmarksCount commentsCount followersCount followingCount likesCount sharesCount settings pushSubscriptions location geohash lastActivityViewed created_at updated_at')
         .sort(sortOptions)
         .skip(skip)
         .limit(limitNumber)

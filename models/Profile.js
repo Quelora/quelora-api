@@ -41,6 +41,18 @@ const profileSchema = new mongoose.Schema({
   family_name: {
     type: String,
     required: false,
+  },  
+  email: {
+    type: String,
+    required: false,
+    trim: true,
+    lowercase: true,
+    validate: {
+      validator: function(v) {
+        return !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+      },
+      message: props => `${props.value} is not a valid email`
+    }
   },
   picture: {
     type: String,
@@ -401,15 +413,17 @@ profileSchema.statics.updateSettings = async function(cid, author, key, value) {
   return updatedProfile;
 };
 
+
 /**
- * Generates a unique profile name based on given_name and family_name
+ * Generates a unique profile name based on email or given_name and family_name
  * @private
  * @async
- * @param {string} given_name - User's given name
- * @param {string} family_name - User's family name
+ * @param {string} email - User's email
+ * @param {string} name - Combined given_name and family_name
+ * @param {string} cid - The profile's unique CID
  * @returns {Promise<string>} A unique profile name
  */
-async function generateUniqueName(given_name, family_name) {
+async function generateUniqueName(email, name, cid) {
   const sanitize = (str) => {
     if (!str) return '';
     return str
@@ -418,30 +432,42 @@ async function generateUniqueName(given_name, family_name) {
       .slice(0, 15);
   };
 
-  let baseName = sanitize(given_name) + sanitize(family_name || '');
-  if (!baseName) baseName = 'user';
-  if (baseName.length < 3) baseName = baseName.padEnd(3, '0');
-
-  let name = baseName.slice(0, 15);
+  let baseName;
   let counter = 0;
 
-  const nameRegex = /^[a-zA-Z0-9]{3,15}$/;
-  if (!nameRegex.test(name)) {
-    name = 'user' + Math.floor(1000 + Math.random() * 9000);
-  }
-
-  while (await this.findOne({ name })) {
-    counter++;
-    const suffix = counter.toString();
-    const maxBaseLength = 15 - suffix.length;
-    name = baseName.slice(0, maxBaseLength) + suffix;
-    if (!nameRegex.test(name)) {
-      name = 'user' + Math.floor(1000 + Math.random() * 9000);
+  if (email) {
+    // Extraer el usuario del email (antes del @)
+    baseName = sanitize(email.split('@')[0]);
+    if (baseName.length < 8) {
+      baseName = baseName.padEnd(8, '0');
+    }
+  } else {
+    // Combinar given_name y family_name
+    baseName = sanitize(name);
+    if (baseName.length < 8) {
+      baseName = baseName.padEnd(8, '0');
     }
   }
 
-  return name;
+  let username = baseName.slice(0, 15);
+  const nameRegex = /^[a-zA-Z0-9]{3,15}$/;
+
+  if (!nameRegex.test(username)) {
+    username = 'user' + Math.floor(1000 + Math.random() * 9000);
+  }
+
+  // Verificar unicidad para la tupla name, cid
+  while (await this.findOne({ name: username, cid })) {
+    counter++;
+    username = `${baseName.slice(0, 15 - counter.toString().length)}${counter}`;
+    if (!nameRegex.test(username)) {
+      username = 'user' + Math.floor(1000 + Math.random() * 9000);
+    }
+  }
+
+  return username;
 }
+
 
 /**
  * Ensures a profile exists for a user, creating or updating as needed
@@ -461,13 +487,15 @@ profileSchema.statics.ensureProfileExists = async function (user, cid, geoData =
   let profile = await this.findOne({ author: user.author, cid: cid });
 
   if (!profile) {
-    const uniqueName = await generateUniqueName.call(this, user.given_name, user.family_name);
+    const fullName = `${user?.given_name}${user?.family_name || ''}`.trim();
+    const uniqueName = await generateUniqueName.call(this, user?.email, fullName, cid);
     profile = new this({
       cid: cid,
       author: user.author,
       name: uniqueName,
       given_name: user.given_name,
       family_name: user.family_name,
+      email: user.email,
       picture: user.picture,
       locale: user.locale,
       location: null

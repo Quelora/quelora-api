@@ -274,7 +274,7 @@ exports.addComment = async (req, res, next) => {
     await recordActivityHit(`activity:comments:${req.cid}`, 'added');
 
     //Notify all followers
-    await sendPushNotificationsToFollowers(author, 'new_comment_followers.title','new_comment_followers.message', { 'name':profile.name, 'post':post.description }, {entity, commentId: newComment._id} ,'comment');
+    await sendPushNotificationsToFollowers(cid, author, 'new_comment_followers.title','new_comment_followers.message', { 'name':profile.name, 'post':post.description }, {entity, commentId: newComment._id} ,'comment');
 
     const authorProfile = await Profile.findOne({ author }).select('author name given_name family_name picture locale created_at');
     const formattedComment = formatComment(newComment, authorProfile, author);
@@ -361,12 +361,12 @@ exports.addReply = async (req, res, next) => {
     await recordGeoActivity(req, 'reply');
     await recordActivityHit(`activity:replies:${req.cid}`, 'added');
 
-    const authorProfile = await Profile.findOne({ author }).select('author name given_name family_name picture locale created_at');
+    const authorProfile = await Profile.findOne({ author, cid }).select('author name given_name family_name picture locale created_at');
     const formattedReply = formatComment(reply, authorProfile, author);
 
-    const commentDoc = await Comment.findById(comment).select('author text');
+    const commentDoc = await Comment.findById(comment).select('author text cid');
     if(author != commentDoc.author){
-      await sendPushNotification( commentDoc.author, 'new_comment.title', 'new_comment.message', {'name':profile.name, 'comment':commentDoc.text}, {entity, commentId: comment, replyId: reply._id} ,'reply');
+      await sendPushNotification( cid, commentDoc.author, 'new_comment.title', 'new_comment.message', {'name':profile.name, 'comment':commentDoc.text}, {entity, commentId: comment, replyId: reply._id} ,'reply');
 
     }
     
@@ -470,11 +470,7 @@ exports.likeComment = async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid entity or comment ID' });
     }
 
-    const post = await Post.findOne({ 
-      entity, 
-      cid, 
-      'deletion.status': 'active' 
-    }).select('config.interaction.allow_likes');
+    const post = await Post.findOne({  entity, cid, 'deletion.status': 'active' }).select('config.interaction.allow_likes');
 
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
@@ -484,26 +480,18 @@ exports.likeComment = async (req, res, next) => {
       return res.status(403).json({ message: 'Likes are not allowed for this post.' });
     }
 
-    const commentDoc = await Comment.findOne({
-      _id: comment,
-      post: post._id,
-      visible: true
-    });
+    const commentDoc = await Comment.findOne({ _id: comment, post: post._id, visible: true });
 
     if (!commentDoc) {
       return res.status(404).json({ message: 'Comment not found or not visible' });
     }
 
-    const profile = await Profile.findOne({ author });
+    const profile = await Profile.findOne({ author, cid });
     if (!profile) {
       return res.status(404).json({ message: 'Profile not found.' });
     }
 
-    const existingLike = await ProfileLike.findOne({
-      profile_id: profile._id,
-      fk_id: comment,
-      fk_type: 'comment'
-    });
+    const existingLike = await ProfileLike.findOne({ profile_id: profile._id, fk_id: comment, fk_type: 'comment' });
 
     let updatedComment;
     if (existingLike) {
@@ -515,12 +503,7 @@ exports.likeComment = async (req, res, next) => {
       await recordActivityHit(`activity:likes:${cid}`, 'removed');
 
     } else {
-      await ProfileLike.create({
-        profile_id: profile._id,
-        fk_id: comment,
-        fk_type: 'comment',
-        created_at: new Date()
-      });
+      await ProfileLike.create({ profile_id: profile._id, fk_id: comment, fk_type: 'comment', created_at: new Date() });
 
       updatedComment = await Comment.incrementLikes(comment, author);
       await cacheService.delete(`cid:${cid}:commentLikes:${comment}`);
@@ -537,6 +520,7 @@ exports.likeComment = async (req, res, next) => {
         replyId = String(getBaseComment._id) === String(comment) ? null : comment;
 
         await sendPushNotification(
+          cid,
           commentDoc.author,
           'new_like.title',
           'new_like.message',
@@ -640,11 +624,7 @@ exports.deleteComment = async (req, res, next) => {
     const activityType = commentDoc.parent ? 'replies' : 'comments';
     await recordActivityHit(`activity:${activityType}:${cid}`, 'deleted');
 
-    res.status(200).json({ 
-      message: 'Comment deleted successfully',
-      commentId: commentDoc._id,
-      entityId: commentDoc.entity
-    });
+    res.status(200).json({ message: 'Comment deleted successfully', commentId: commentDoc._id, entityId: commentDoc.entity });
     next();
   } catch (error) {
     console.error("❌ Error deleting comment:", error);

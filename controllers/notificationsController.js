@@ -44,17 +44,17 @@ exports.subscribeProfile = async (req, res) => {
 
     if (existingSubIndex >= 0) {
       await Profile.updateOne(
-        { author, 'pushSubscriptions.subscriptionId': subscriptionId },
+        { author, cid, 'pushSubscriptions.subscriptionId': subscriptionId },
         { $set: { 'pushSubscriptions.$': subscriptionData } }
       );
     } else {
       await Profile.updateOne(
-        { author },
+        { author, cid },
         { $push: { pushSubscriptions: subscriptionData } }
       );
     }
 
-    //await sendPushNotification(author, 'welcome_message.title', 'welcome_message.message', {name: profile.name});
+    //await sendPushNotification(cid, author, 'welcome_message.title', 'welcome_message.message', {name: profile.name});
 
     res.json({ 
       success: true,
@@ -72,13 +72,14 @@ exports.unsubscribeProfile = async (req, res) => {
   try {
     const { subscriptionId } = req.body;
     const author = req.user.author;
+    const cid = req.cid;
 
     if (!subscriptionId) {
       return res.status(400).json({ error: 'subscriptionId required' });
     }
 
     const result = await Profile.updateOne(
-      { author },
+      { author, cid },
       { $pull: { pushSubscriptions: { subscriptionId } } }
     );
 
@@ -99,7 +100,7 @@ exports.unsubscribeProfile = async (req, res) => {
 
 exports.sendNotification = async (req, res) => {
   try {
-    const { author, title, body, data } = req.body;
+    const { cid, author, title, body, data } = req.body;
 
     if (!author) {
       return res.status(400).json({ error: 'author is required' });
@@ -109,7 +110,7 @@ exports.sendNotification = async (req, res) => {
       return res.status(400).json({ error: 'title and body are required' });
     }
 
-    const job = await addNotificationJob(author, title, body, data || {});
+    const job = await addNotificationJob(cid, author, title, body, data || {});
     
     res.json({ 
       success: true,
