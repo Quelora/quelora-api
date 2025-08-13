@@ -15,7 +15,7 @@ const { randomUUID } = require('crypto');
  * @returns {Promise<void>}
  */
 async function sendPushNotificationsToFollowers(cid, author, title, message, data = {}, extra = {}, type = 'default') {
-  if (!author || !title || !message) {
+  if (!cid || !author || !title || !message) {
     throw new Error('Author, title, and message are required');
   }
 
@@ -25,12 +25,12 @@ async function sendPushNotificationsToFollowers(cid, author, title, message, dat
 
   const profile = await Profile.findOne({ author, cid });
   if (!profile) {
-    throw new Error(`Profile not found for author ${author}`);
+    throw new Error(`Profile not found for author ${author} cid ${cid}`);
   }
 
   const followers = await ProfileFollower.find({ profile_id: profile._id }).populate('follower_id');
   if (!followers || followers.length === 0) {
-    console.warn(`No followers found for user ${author}`);
+    //console.warn(`No followers found for user ${author}`);
     return;
   }
 
@@ -45,6 +45,7 @@ async function sendPushNotificationsToFollowers(cid, author, title, message, dat
 
     try {
       await notificationQueue.add('send-notification', {
+        cid,
         author: followerProfile.author,
         title,
         body: message,
@@ -62,6 +63,7 @@ async function sendPushNotificationsToFollowers(cid, author, title, message, dat
 
 /**
  * Sends a push notification to a user
+ * @param {string} cid - Client ID
  * @param {string} author - User identifier
  * @param {string} title - Notification title
  * @param {string} message - Notification message
@@ -70,28 +72,28 @@ async function sendPushNotificationsToFollowers(cid, author, title, message, dat
  * @returns {Promise<void>}
  */
 async function sendPushNotification(cid, author, title, message, data = {}, extra = {}, type = 'default') {
-  if (!author || !title || !message) {
+  if (!cid || !author || !title || !message) {
     throw new Error('Author, title, and message are required');
   }
   
+  const profile = await Profile.findOne({ author, cid });
 
-  const receiver = await Profile.findOne({ author });
-
-  title = await getLocalizedMessage(title, receiver.locale ?? 'en');
-  message = await getLocalizedMessage(message, receiver.locale ?? 'en', data);
+  title = await getLocalizedMessage(title, profile.locale ?? 'en');
+  message = await getLocalizedMessage(message, profile.locale ?? 'en', data);
 
   if (typeof data !== 'object' || data === null || Array.isArray(data)) {
     throw new Error('Data must be a plain object');
   }
 
-  const profile = await Profile.findOne({ author, cid });
+
   if (!profile || !profile.pushSubscriptions || profile.pushSubscriptions.length === 0) {
-    console.warn(`No active subscriptions for user ${author}`);
+    console.warn(`No active subscriptions for user ${author} - cid ${cid}`);
     return;
   }
 
   try {
     await notificationQueue.add('send-notification', {
+      cid,
       author,
       title,
       body: message,

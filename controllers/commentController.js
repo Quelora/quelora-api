@@ -280,7 +280,7 @@ exports.addComment = async (req, res, next) => {
     const formattedComment = formatComment(newComment, authorProfile, author);
 
     await activityService.logActivity({
-      author: { _id: profile._id, username: profile.given_name, picture:  profile.picture },
+      author: { _id: profile._id, username: profile.name, picture:  profile.picture },
       actionType: 'comment',
       target: {
         type: 'post',
@@ -371,7 +371,7 @@ exports.addReply = async (req, res, next) => {
     }
     
     await activityService.logActivity({
-      author: { _id: profile._id, username: profile.given_name, picture:  profile.picture },
+      author: { _id: profile._id, username: profile.name, picture:  profile.picture },
       actionType: 'reply',
       target: {
         type: 'reply',
@@ -531,7 +531,7 @@ exports.likeComment = async (req, res, next) => {
       }
 
       await activityService.logActivity({
-        author: { _id: profile._id, username: profile.given_name, picture:  profile.picture },
+        author: { _id: profile._id, username: profile.name, picture:  profile.picture },
         actionType: 'like',
         target: {
           type: 'comment',

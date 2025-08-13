@@ -197,7 +197,7 @@ exports.followUser = async (req, res, next) => {
                                   { followRequest: currentProfile.author, icon: currentProfile.picture },
                                   'follow_request');
 
-      await activityService.logActivity({ author: {  _id: currentProfile._id,  username: currentProfile.given_name, picture: currentProfile.picture },
+      await activityService.logActivity({ author: {  _id: currentProfile._id,  username: currentProfile.name, picture: currentProfile.picture },
                                           actionType: 'follower-request',
                                           targetProfile: { _id: profileToFollow._id },
                                           references: { profileId: currentProfile._id }});
@@ -224,7 +224,7 @@ exports.followUser = async (req, res, next) => {
                                   { follow: currentProfile.author, icon: currentProfile.picture }, 
                                   'follower' );
 
-      await activityService.logActivity({ author: {  _id: currentProfile._id,  username: currentProfile.given_name, picture: currentProfile.picture },
+      await activityService.logActivity({ author: {  _id: currentProfile._id,  username: currentProfile.name, picture: currentProfile.picture },
                                           actionType: 'follower',
                                           targetProfile: { _id: profileToFollow._id },
                                           references: { profileId: currentProfile._id }});
@@ -322,7 +322,7 @@ exports.approveFollowRequest = async (req, res, next) => {
       await activityService.logActivity({
         author: {
           _id: targetProfile._id,
-          username: targetProfile.given_name,
+          username: targetProfile.name,
           picture: targetProfile.picture
         },
         actionType: 'follow-approval',

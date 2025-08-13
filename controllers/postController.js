@@ -758,7 +758,7 @@ exports.likePost = async (req, res, next) => {
       await recordActivityHit(`activity:likes:${cid}`, `added`);
 
       await activityService.logActivity({
-        author: { _id: profile._id, username: profile.given_name, picture: profile.picture },
+        author: { _id: profile._id, username: profile.name, picture: profile.picture },
         actionType: 'like',
         target: { id: post._id, type: 'post', preview: post.description?.substring(0, 50) + '...' },
         references: { entity: post.entity },
@@ -797,7 +797,7 @@ exports.sharePost = async (req, res, next) => {
       if (!profile) { return res.status(404).json({ message: 'Profile not found.' }); }
       await ProfileShare.create({ profile_id: profile._id, post_id: post._id, created_at: Date.now() });
       await activityService.logActivity({
-        author: { _id: profile._id, username: profile.given_name, picture: profile.picture },
+        author: { _id: profile._id, username: profile.name, picture: profile.picture },
         actionType: 'share',
         target: { id: post._id, type: 'post', preview: post.description?.substring(0, 50) + '...' },
         references: { entity: post.entity },
