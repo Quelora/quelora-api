@@ -1,7 +1,8 @@
 // ./ssoProviders/GoogleProvider.js
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
-//clientSecretCipher
+const crypto = require('crypto');
+
 class GoogleProvider {
     constructor(config) {
         this.client = new OAuth2Client(config.googleClientId);
@@ -10,7 +11,6 @@ class GoogleProvider {
 
     async verify(credential) {
         try {
-            
             const ticket = await this.client.verifyIdToken({ 
                 idToken: credential, 
                 audience: this.config.googleClientId 
@@ -27,12 +27,12 @@ class GoogleProvider {
                     aud: this.config.baseURL,
                     iat: issuedAtTime,
                     exp: tokenExpiration,
-                    email: payload.email,
-                    given_name: payload.given_name,
-                    family_name: payload.family_name || payload.given_name,
-                    author: payload.sub,
+                    email: payload.email || '',
+                    given_name: payload.given_name || '',
+                    family_name: payload.family_name || payload.given_name || '',
                     picture: payload.picture || '',
-                    locale: payload.locale || 'en'
+                    locale: payload.locale || 'en',
+                    author: crypto.createHash('sha256').update(payload.sub).digest('hex')
                 };
 
                 const token = jwt.sign(jwtPayload, this.config.jwtSecretKey);

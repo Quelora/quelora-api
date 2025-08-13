@@ -1,5 +1,7 @@
+// ./ssoProviders/XProvider.js
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
+const crypto = require('crypto');
 
 class XProvider {
     constructor(config) {
@@ -8,7 +10,6 @@ class XProvider {
 
     async verify(accessToken) {
         try {
-            // Verify token with X API
             const response = await axios.get('https://api.twitter.com/2/users/me', {
                 headers: {
                     Authorization: `Bearer ${accessToken}`,
@@ -38,12 +39,12 @@ class XProvider {
                 aud: this.config.baseURL,
                 iat: issuedAtTime,
                 exp: tokenExpiration,
-                email: userData.username + '@x.placeholder.com', // X doesn't provide email
+                email: userData.username + '@x.placeholder.com',
                 given_name: userData.name.split(' ')[0] || userData.username,
                 family_name: userData.name.split(' ').slice(1).join(' ') || userData.username,
-                author: userData.id,
                 picture: userData.profile_image_url || '',
-                locale: 'en' // Default, as X doesn't provide locale
+                locale: 'en',
+                author: crypto.createHash('sha256').update(userData.id).digest('hex')
             };
 
             const token = jwt.sign(jwtPayload, this.config.jwtSecretKey);

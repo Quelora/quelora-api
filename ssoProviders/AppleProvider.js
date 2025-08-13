@@ -1,5 +1,7 @@
+// ./ssoProviders/AppleProvider.js
 const jwt = require('jsonwebtoken');
 const jwksClient = require('jwks-rsa');
+const crypto = require('crypto');
 
 class AppleProvider {
     constructor(config) {
@@ -41,9 +43,9 @@ class AppleProvider {
                     email: payload.email || '',
                     given_name: payload.given_name || '',
                     family_name: payload.family_name || payload.given_name || '',
-                    author: payload.sub,
                     picture: '',
-                    locale: payload.locale || 'en'
+                    locale: payload.locale || 'en',
+                    author: crypto.createHash('sha256').update(payload.sub).digest('hex')
                 };
 
                 const token = jwt.sign(jwtPayload, this.config.jwtSecretKey);

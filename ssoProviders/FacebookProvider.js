@@ -1,5 +1,7 @@
+// ./ssoProviders/FaebookProvider.js
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
+const crypto = require('crypto');
 
 class FacebookProvider {
     constructor(config) {
@@ -10,7 +12,7 @@ class FacebookProvider {
         try {
             const response = await axios.get('https://graph.facebook.com/me', {
                 params: {
-                    fields: 'id,email,first_name,last_name,picture,locale',
+                    fields: 'id,name,email,first_name,last_name,picture,locale',
                     access_token: credential
                 }
             });
@@ -29,9 +31,9 @@ class FacebookProvider {
                     email: payload.email || '',
                     given_name: payload.first_name || '',
                     family_name: payload.last_name || payload.first_name || '',
-                    author: payload.id,
                     picture: payload.picture?.data?.url || '',
-                    locale: payload.locale || 'en'
+                    locale: payload.locale || 'en',
+                    author: crypto.createHash('sha256').update(payload.id).digest('hex')
                 };
 
                 const token = jwt.sign(jwtPayload, this.config.jwtSecretKey);

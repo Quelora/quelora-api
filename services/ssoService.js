@@ -1,8 +1,8 @@
 const { getClientConfig } = require('./clientConfigService');
 const GoogleProvider = require('../ssoProviders/GoogleProvider');
 const XProvider = require('../ssoProviders/XProvider');
-// const FacebookProvider = require('../ssoProviders/FacebookProvider');
-// const AppleProvider = require('../ssoProviders/AppleProvider');
+const FacebookProvider = require('../ssoProviders/FacebookProvider');
+const AppleProvider = require('../ssoProviders/AppleProvider');
 // const QueloraProvider = require('../ssoProviders/QueloraProvider');
 
 async function ssoService(cid, providerName, credential) {
@@ -22,6 +22,7 @@ async function ssoService(cid, providerName, credential) {
     }
 
     // Select provider using switch
+    let provider;
     try {
         switch (providerName) {
             case 'google':
@@ -37,19 +38,19 @@ async function ssoService(cid, providerName, credential) {
                 // provider = new QueloraProvider(clientConfig.providerDetails.Quelora);
                 return { status: 'error', message: 'Quelora provider not implemented' };
             case 'facebook':
-                // provider = new FacebookProvider(clientConfig.providerDetails.Facebook);
-                return { status: 'error', message: 'Facebook provider not implemented' };
-            case 'aApple':
-                // provider = new AppleProvider(clientConfig.providerDetails.Apple);
-                return { status: 'error', message: 'Apple provider not implemented' };
+                provider = new FacebookProvider(clientConfig.providerDetails.Facebook);
+                break;
+            case 'apple':
+                provider = new AppleProvider(clientConfig.providerDetails.Apple);
+                break;
             case 'x':
-                provider = new xProvider(clientConfig.providerDetails.x);
-                return { status: 'error', message: 'X provider not implemented' };
+                provider = new XProvider(clientConfig.providerDetails.X);
+                break;
             default:
                 return { status: 'error', message: `Provider not supported: ${providerName || 'unknown'}` };
         }
     } catch (error) {
-        console.error(`Error initializing provider ${provider}:`, error.message);
+        console.error(`Error initializing provider ${providerName}:`, error.message);
         return { status: 'error', message: `Error initializing provider ${providerName}` };
     }
 
