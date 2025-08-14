@@ -54,6 +54,9 @@ const emailWorker = new Worker('emails', async job => {
         user: emailConfig.smtp_user,
         pass: emailConfig.smtp_pass,
       },
+      tls: {
+        rejectUnauthorized: false, 
+      },
     });
 
     const mailOptions = {
@@ -114,6 +117,9 @@ const sendMail = async (cid, author, subject, body, to = null) => {
       auth: {
         user: emailConfig.smtp_user,
         pass: emailConfig.smtp_pass,
+      },      
+      tls: {
+        rejectUnauthorized: false, 
       },
     });
 
