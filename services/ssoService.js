@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { getClientConfig } = require('./clientConfigService');
 const GoogleProvider = require('../ssoProviders/GoogleProvider');
 const XProvider = require('../ssoProviders/XProvider');
@@ -24,27 +25,39 @@ async function ssoService(cid, providerName, credential) {
     // Select provider using switch
     let provider;
     try {
+        const commonConfig = {
+            jwtSecretKey: clientConfig.jwtSecretCipher || process.env.JWT_SECRET,
+            baseURL: clientConfig.baseUrl,
+            jwtTimeToLive: (parseInt(process.env.JWT_TTL, 10) || 72) * 3600 
+        };
+
         switch (providerName) {
             case 'google':
-                const googleConfig = {
-                    googleClientId: clientConfig.providerDetails.Google.clientId,
-                    jwtSecretKey: 'kzUf4sxss4AeG5uHkNZAqT1Nyi1zVfpz',
-                    baseURL: clientConfig.baseUrl,
-                    jwtTimeToLive: 3600 * 24
-                };
-                provider = new GoogleProvider(googleConfig);
+                provider = new GoogleProvider({
+                    ...clientConfig.providerDetails.Google,
+                    ...commonConfig
+                });
                 break;
             case 'quelora':
-                // provider = new QueloraProvider(clientConfig.providerDetails.Quelora);
+                // provider = new QueloraProvider({ ...clientConfig.providerDetails.Quelora, ...commonConfig });
                 return { status: 'error', message: 'Quelora provider not implemented' };
             case 'facebook':
-                provider = new FacebookProvider(clientConfig.providerDetails.Facebook);
+                provider = new FacebookProvider({
+                    ...clientConfig.providerDetails.Facebook,
+                    ...commonConfig
+                });
                 break;
             case 'apple':
-                provider = new AppleProvider(clientConfig.providerDetails.Apple);
+                provider = new AppleProvider({
+                    ...clientConfig.providerDetails.Apple,
+                    ...commonConfig
+                });
                 break;
             case 'x':
-                provider = new XProvider(clientConfig.providerDetails.X);
+                provider = new XProvider({
+                    ...clientConfig.providerDetails.X,
+                    ...commonConfig
+                });
                 break;
             default:
                 return { status: 'error', message: `Provider not supported: ${providerName || 'unknown'}` };
@@ -53,6 +66,7 @@ async function ssoService(cid, providerName, credential) {
         console.error(`Error initializing provider ${providerName}:`, error.message);
         return { status: 'error', message: `Error initializing provider ${providerName}` };
     }
+
 
     // Verify credential
     try {
