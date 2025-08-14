@@ -143,6 +143,44 @@ async function getClientVapidConfig(cid) {
 }
 
 /**
+ * Retrieves the Email configuration for a client (by `cid`).
+ * 
+ * @param {string} cid - The client ID.
+ * @returns {Promise<any|null>} - The decrypted Email object, or null if not found.
+ */
+async function getClientEmailConfig(cid) {
+  const cacheKey = `${CACHE_PREFIX}:${cid}:email`;
+
+  try {
+    // Attempt to retrieve from cache
+    let emailConfig = await cacheService.get(cacheKey);
+
+    // If not cached, fetch from DB and decrypt
+    if (!emailConfig) {
+      const user = await User.findOne(
+        { 'clients.cid': cid },
+        { 'clients.$': 1 }
+      );
+
+      if (!user || !user.clients || user.clients.length === 0) {
+        return null;
+      }
+
+      const client = user.clients[0];
+      emailConfig = user.decryptEmail(client.email);
+
+      // Store in cache
+      await cacheService.set(cacheKey, emailConfig, CACHE_TTL);
+    }
+
+    return emailConfig || null;
+  } catch (error) {
+    console.error(`Error getting EMAIL config for CID ${cid}:`, error);
+    return null;
+  }
+}
+
+/**
  * Safely retrieves a nested value from an object using a dot-separated path string.
  * 
  * @param {object} obj - The source object.
@@ -181,5 +219,6 @@ module.exports = {
   getClientConfig,
   getClientPostConfig,
   getClientVapidConfig,
+  getClientEmailConfig,
   clearClientConfigCache
 };

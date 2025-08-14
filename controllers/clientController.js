@@ -1,13 +1,99 @@
 // ./controllers/clientController.js
 const mongoose = require('mongoose');
-const deepMerge = require('../utils/deepMerge');
 const User = require('../models/User');
-const Post = require('../models/Post');
-const Profile = require('../models/Profile');
-const Comment = require('../models/Comment');
-const formatComment = require('../utils/formatComment');
+const { decryptJSON, generateKeyFromString } = require('../utils/cipher');
 const clientConfigService = require('../services/clientConfigService');
-const puppeteerService = require('../services/puppeteerService');
+
+exports.upsertClient = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { 
+      cid,
+      description,
+      apiUrl,
+      config,
+      postConfig,
+      vapid,
+      email,
+      configEncrypted = config,
+      postConfigEncrypted = postConfig,
+      vapidEncrypted = vapid,
+      emailEncrypted = email
+    } = req.body;
+
+    if (!description || typeof description !== 'string' || description.trim().length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Valid description is required' 
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'User not found' 
+      });
+    }
+
+    const decryptionKey = cid ? generateKeyFromString(cid) : null;
+
+    const decryptField = (encryptedData) => {
+      if (!encryptedData) return null;
+      if (!decryptionKey) return encryptedData;
+      try {
+        return typeof encryptedData === 'string' 
+          ? decryptJSON(encryptedData, decryptionKey) 
+          : encryptedData;
+      } catch (error) {
+        throw new Error(`Failed to decrypt field: ${error.message}`);
+      }
+    };
+
+    let finalConfig = { modeDiscovery: false };
+    let finalPostConfig = null;
+    let finalVapid = null;
+    let finalEmail = null;
+
+    try {
+      if (configEncrypted) finalConfig = { ...decryptField(configEncrypted), modeDiscovery: false };
+      if (postConfigEncrypted) finalPostConfig = decryptField(postConfigEncrypted);
+      if (vapidEncrypted) finalVapid = decryptField(vapidEncrypted);
+      if (emailEncrypted) finalEmail = decryptField(emailEncrypted);
+    } catch (error) {
+      return res.status(400).json({ 
+        success: false,
+        error: error.message 
+      });
+    }
+
+    const client = await user.updateCID(
+      cid || await user.addClient(description.trim()),
+      description.trim(),
+      apiUrl || '',
+      finalConfig,
+      finalPostConfig,
+      finalVapid,
+      finalEmail
+    );
+
+    if (cid) await clientConfigService.clearClientConfigCache(cid);
+    
+    return res.json({ 
+      success: true,
+      message: 'Client updated successfully',
+      client
+    });
+
+  } catch (error) {
+    const statusCode = error.message.includes('not found') ? 404 : 
+                     error.code === 11000 ? 409 : 500;
+    res.status(statusCode).json({ 
+      success: false,
+      error: error.message || 'Internal server error' 
+    });
+  }
+};
 
 exports.getUsersByClient = async (req, res, next) => {
   try {
@@ -304,77 +390,6 @@ exports.restorePostFromTrash = async (req, res, next) => {
     res.status(200).json({ success: true, message: 'Post successfully restored from trash.', postObject });
   } catch (error) {
     next(error);
-  }
-};
-
-exports.upsertClient = async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const { cid, description, apiUrl, config, postConfig, vapid } = req.body;
-
-    // Validate required fields
-    if (!description) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Description is required' 
-      });
-    }
-
-    // Validate description
-    if (typeof description !== 'string' || description.trim().length === 0) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Description must be a non-empty string' 
-      });
-    }
-
-    let processedConfig = {};
-    if (config) {
-      if (typeof config !== 'object' || Array.isArray(config)) {
-        return res.status(400).json({ 
-          success: false,
-          error: 'config must be a valid object' 
-        });
-      }
-      processedConfig = { ...config };
-      if (processedConfig.modeDiscovery === undefined) {
-        processedConfig.modeDiscovery = false;
-      }
-    } else {
-      processedConfig = { modeDiscovery: false };
-    }
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ 
-        success: false,
-        error: 'User not found' 
-      });
-    }
-
-    let client;
-    let newCid;
-
-    if (!cid) {
-      newCid = await user.addClient(description.trim());
-    }
-    
-    // Update existing client
-    client = await user.updateCID(cid ? cid: newCid, description.trim(), apiUrl ? apiUrl : '', processedConfig, postConfig, vapid);
-    await clientConfigService.clearClientConfigCache(cid);
-    return res.json({ 
-      success: true,
-      message: 'Client updated successfully',
-      client
-    });
-    
-  } catch (error) {
-    console.error('Error in upsertClient:', error);
-    const statusCode = error.message.includes('CID not found') ? 404 : error.code === 11000 ? 409 : 500;
-    res.status(statusCode).json({ 
-      success: false,
-      error: error.message || 'Internal server error' 
-    });
   }
 };
 

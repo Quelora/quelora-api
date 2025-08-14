@@ -127,7 +127,7 @@ if (process.env.WORKER_MONITOR_INTERVAL_MS) {
 
 module.exports = {
   notificationQueue,
-  addNotificationJob: async (cid, author, title, body, data = {}) => {
+  addPushJob: async (cid, author, title, body, data = {}) => {
     const jobId = `notif:${cid}:${author}:${Date.now()}:${randomUUID()}`;
     return notificationQueue.add('send-notification', { 
       cid,

@@ -1,4 +1,3 @@
-// ./models/User.js
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const { encrypt, decrypt } = require('../utils/cipher');
@@ -8,7 +7,7 @@ const Post = require('./Post'); // Import Post model to access defaultConfig
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
 
 // Allowed configuration schema
-const allowedConfigKeys = ['login', 'moderation', 'toxicity', 'translation', 'geolocation', 'cors', 'language', 'modeDiscovery', 'discoveryDataUrl','entityConfig'];
+const allowedConfigKeys = ['login', 'moderation', 'toxicity', 'translation', 'geolocation', 'cors', 'language', 'modeDiscovery', 'discoveryDataUrl', 'entityConfig'];
 
 // Sub-schema for user-associated clients
 const clientSchema = new mongoose.Schema({
@@ -72,97 +71,82 @@ const clientSchema = new mongoose.Schema({
     }
   },
   postConfig: {
-  type: mongoose.Schema.Types.Mixed,
-  default: {},
-  required: true,
-  validate: {
-    validator: async function(postConfig) {
-      try {
-        const defaultConfig = Post.getDefaultConfig();
+    type: mongoose.Schema.Types.Mixed,
+    default: {},
+    required: true,
+    validate: {
+      validator: async function(postConfig) {
+        try {
+          const defaultConfig = Post.getDefaultConfig();
 
-        const postConfigKeys = Object.keys(postConfig);
+          const postConfigKeys = Object.keys(postConfig);
 
-        // Check for invalid top-level keys
-        const invalidKeys = postConfigKeys.filter(key => !Object.keys(defaultConfig).includes(key));
-        if (invalidKeys.length > 0) {
-          //console.log('Invalid top-level keys found:', invalidKeys);
-          throw new Error(`Invalid postConfig keys: ${invalidKeys.join(', ')}`);
-        }
-
-        // Validate nested structures
-        for (const [key, value] of Object.entries(postConfig)) {
-          //console.log(`Validating key: ${key}`);
-          const defaultValue = defaultConfig[key];
-
-          if (key === 'visibility') {
-            if (typeof value !== 'string' || !['public', 'private', 'followers'].includes(value)) {
-              //console.log(`Invalid visibility value: ${value}`);
-              throw new Error(`Invalid value for visibility: ${value}`);
-            }
-          } else if (key === 'category') {
-            if (typeof value !== 'string' || value.length > 50) {
-              //console.log(`Invalid category: ${value}`);
-              throw new Error(`Category must be a string with max length 50`);
-            }
-          } else if (key === 'tags') {
-            if (!Array.isArray(value) || value.some(tag => typeof tag !== 'string' || tag.length > 30)) {
-              //console.log(`Invalid tags: ${JSON.stringify(value)}`);
-              throw new Error(`Tags must be an array of strings with max length 30`);
-            }
-            if (value.length > 10) {
-              //console.log(`Too many tags: ${value.length}`);
-              throw new Error(`Maximum 10 tags allowed`);
-            }
-          } else if (typeof defaultValue === 'object' && defaultValue !== null && !Array.isArray(defaultValue)) {
-            if (typeof value !== 'object' || Array.isArray(value) || value === null) {
-              //console.log(`Invalid type for ${key}: ${typeof value}`);
-              throw new Error(`Configuration for '${key}' must be an object`);
-            }
-            for (const [subKey, subValue] of Object.entries(value)) {
-              if (!(subKey in defaultValue)) {
-                //console.log(`Invalid sub-key in ${key}: ${subKey}`);
-                throw new Error(`Invalid sub-key in ${key}: ${subKey}`);
-              }
-              const defaultSubValue = defaultValue[subKey];
-              if (typeof defaultSubValue === 'boolean' && typeof subValue !== 'boolean') {
-                //console.log(`Invalid boolean for ${key}.${subKey}: ${subValue}`);
-                throw new Error(`'${subKey}' in ${key} must be a boolean`);
-              } else if (typeof defaultSubValue === 'number' && (typeof subValue !== 'number' || subValue < 0)) {
-                //console.log(`Invalid number for ${key}.${subKey}: ${subValue}`);
-                throw new Error(`'${subKey}' in ${key} must be a non-negative number`);
-              } else if (typeof defaultSubValue === 'string') {
-                if (subKey === 'post_language' && (typeof subValue !== 'string' || subValue.length > 10)) {
-                  //console.log(`Invalid post_language: ${subValue}`);
-                  throw new Error(`'post_language' must be a string with max length 10`);
-                }
-                if (subKey === 'moderation_prompt' && (typeof subValue !== 'string' || subValue.length > 200)) {
-                  //console.log(`Invalid moderation_prompt: ${subValue}`);
-                  throw new Error(`'moderation_prompt' must be a string with max length 200`);
-                }
-                if ((subKey === 'scheduled_time' || subKey === 'expire_at') && (typeof subValue !== 'string' || isNaN(Date.parse(subValue)))) {
-                  //console.log(`Invalid date for ${key}.${subKey}: ${subValue}`);
-                  throw new Error(`'${subKey}' must be a valid date string`);
-                }
-              } else if (subKey === 'banned_words') {
-                if (!Array.isArray(subValue) || subValue.some(word => typeof word !== 'string' || word.length > 50)) {
-                  //console.log(`Invalid banned_words: ${JSON.stringify(subValue)}`);
-                  throw new Error(`Banned words must be an array of strings with max length 50`);
-                }
-              }
-            }
-          } else {
-            //console.log(`Unexpected key type for ${key}: ${typeof defaultValue}`);
-            throw new Error(`Unexpected configuration type for '${key}'`);
+          // Check for invalid top-level keys
+          const invalidKeys = postConfigKeys.filter(key => !Object.keys(defaultConfig).includes(key));
+          if (invalidKeys.length > 0) {
+            throw new Error(`Invalid postConfig keys: ${invalidKeys.join(', ')}`);
           }
+
+          // Validate nested structures
+          for (const [key, value] of Object.entries(postConfig)) {
+            const defaultValue = defaultConfig[key];
+
+            if (key === 'visibility') {
+              if (typeof value !== 'string' || !['public', 'private', 'followers'].includes(value)) {
+                throw new Error(`Invalid value for visibility: ${value}`);
+              }
+            } else if (key === 'category') {
+              if (typeof value !== 'string' || value.length > 50) {
+                throw new Error(`Category must be a string with max length 50`);
+              }
+            } else if (key === 'tags') {
+              if (!Array.isArray(value) || value.some(tag => typeof tag !== 'string' || tag.length > 30)) {
+                throw new Error(`Tags must be an array of strings with max length 30`);
+              }
+              if (value.length > 10) {
+                throw new Error(`Maximum 10 tags allowed`);
+              }
+            } else if (typeof defaultValue === 'object' && defaultValue !== null && !Array.isArray(defaultValue)) {
+              if (typeof value !== 'object' || Array.isArray(value) || value === null) {
+                throw new Error(`Configuration for '${key}' must be an object`);
+              }
+              for (const [subKey, subValue] of Object.entries(value)) {
+                if (!(subKey in defaultValue)) {
+                  throw new Error(`Invalid sub-key in ${key}: ${subKey}`);
+                }
+                const defaultSubValue = defaultValue[subKey];
+                if (typeof defaultSubValue === 'boolean' && typeof subValue !== 'boolean') {
+                  throw new Error(`'${subKey}' in ${key} must be a boolean`);
+                } else if (typeof defaultSubValue === 'number' && (typeof subValue !== 'number' || subValue < 0)) {
+                  throw new Error(`'${subKey}' in ${key} must be a non-negative number`);
+                } else if (typeof defaultSubValue === 'string') {
+                  if (subKey === 'post_language' && (typeof subValue !== 'string' || subValue.length > 10)) {
+                    throw new Error(`'post_language' must be a string with max length 10`);
+                  }
+                  if (subKey === 'moderation_prompt' && (typeof subValue !== 'string' || subValue.length > 200)) {
+                    throw new Error(`'moderation_prompt' must be a string with max length 200`);
+                  }
+                  if ((subKey === 'scheduled_time' || subKey === 'expire_at') && (typeof subValue !== 'string' || isNaN(Date.parse(subValue)))) {
+                    throw new Error(`'${subKey}' must be a valid date string`);
+                  }
+                } else if (subKey === 'banned_words') {
+                  if (!Array.isArray(subValue) || subValue.some(word => typeof word !== 'string' || word.length > 50)) {
+                    throw new Error(`Banned words must be an array of strings with max length 50`);
+                  }
+                }
+              }
+            } else {
+              throw new Error(`Unexpected configuration type for '${key}'`);
+            }
+          }
+          return true;
+        } catch (error) {
+          console.error('Validation error:', error.message);
+          throw error;
         }
-        return true;
-      } catch (error) {
-        console.error('Validation error:', error.message);
-        throw error;
-      }
-    },
-    message: props => props.reason.message || 'Invalid postConfig configuration'
-  }
+      },
+      message: props => props.reason.message || 'Invalid postConfig configuration'
+    }
   },
   vapid: {
     type: mongoose.Schema.Types.Mixed,
@@ -211,6 +195,46 @@ const clientSchema = new mongoose.Schema({
         return true;
       },
       message: props => props.reason.message || 'Invalid VAPID configuration'
+    }
+  },
+  email: {
+    type: mongoose.Schema.Types.Mixed,
+    default: {},
+    required: false,
+    validate: {
+      validator: function(email) {
+        // Validar smtp_host solo si no está vacío
+        if (email.smtp_host !== undefined && email.smtp_host !== "") {
+          if (typeof email.smtp_host !== 'string' || email.smtp_host.length < 3 || email.smtp_host.length > 100) {
+            throw new Error('smtp_host must be a string between 3 and 100 characters');
+          }
+        }
+
+        // Validar smtp_port solo si no está vacío
+        if (email.smtp_port !== undefined && email.smtp_port !== "") {
+          const portNum = parseInt(email.smtp_port);
+          if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+            throw new Error('smtp_port must be a valid number between 1 and 65535');
+          }
+        }
+
+        // Validar smtp_user solo si no está vacío
+        if (email.smtp_user !== undefined && email.smtp_user !== "") {
+          if (typeof email.smtp_user !== 'string' || email.smtp_user.length < 3 || email.smtp_user.length > 100) {
+            throw new Error('smtp_user must be a string between 3 and 100 characters');
+          }
+        }
+
+        // Validar smtp_pass solo si no está vacío
+        if (email.smtp_pass !== undefined && email.smtp_pass !== "") {
+          if (typeof email.smtp_pass !== 'string' || email.smtp_pass.length < 6 || email.smtp_pass.length > 100) {
+            throw new Error('smtp_pass must be a string between 6 and 100 characters');
+          }
+        }
+
+        return true;
+      },
+      message: props => props.reason.message || 'Invalid email configuration'
     }
   },
   createdAt: {
@@ -374,7 +398,6 @@ clientSchema.methods.validateCors = function(corsConfig) {
   }
 };
 
-
 // Specific validation for entityConfig
 clientSchema.methods.validateEntityConfig = function(entityConfig) {
   // Validate selector
@@ -393,8 +416,8 @@ clientSchema.methods.validateEntityConfig = function(entityConfig) {
   }
 
   // Validate interactionPlacement.position
-  if (!entityConfig.interactionPlacement.position || !['before','after','inside'].includes(entityConfig.interactionPlacement.position)) {
-    throw new Error('interactionPlacement.position must be either "before" or "after"');
+  if (!entityConfig.interactionPlacement.position || !['before', 'after', 'inside'].includes(entityConfig.interactionPlacement.position)) {
+    throw new Error('interactionPlacement.position must be either "before", "after", or "inside"');
   }
 
   // Validate interactionPlacement.relativeTo
@@ -402,7 +425,6 @@ clientSchema.methods.validateEntityConfig = function(entityConfig) {
     throw new Error('interactionPlacement.relativeTo must be a non-empty string with max length 100');
   }
 };
-
 
 // Helper method to validate JSON
 clientSchema.methods.isValidJson = function(jsonString) {
@@ -438,23 +460,28 @@ clientSchema.pre('save', function(next) {
       }
     }
     
-      if (config.login?.jwtSecret && config.login.jwtSecret !== '') {
+    if (config.login?.jwtSecret && config.login.jwtSecret !== '') {
       config.login.jwtSecretCipher = encrypt(config.login.jwtSecret, ENCRYPTION_KEY);
-      config.login.jwtSecret = undefined; //Remove plaintext key
+      config.login.jwtSecret = undefined; // Remove plaintext key
     }
 
     this.markModified('config');
   }
-  next();
-});
 
-// Middleware to encrypt privateKey before saving
-clientSchema.pre('save', function(next) {
+  // Encrypt smtp_pass in email configuration
+  if (this.isModified('email') && this.email?.smtp_pass && this.email.smtp_pass !== '') {
+    this.email.smtp_passCipher = encrypt(this.email.smtp_pass, ENCRYPTION_KEY);
+    this.email.smtp_pass = undefined; // Remove plaintext password
+    this.markModified('email');
+  }
+
+  // Encrypt privateKey in vapid configuration
   if (this.isModified('vapid') && this.vapid?.privateKey) {
     this.vapid.privateKeyCipher = encrypt(this.vapid.privateKey, ENCRYPTION_KEY);
     this.vapid.privateKey = undefined; // Remove plaintext key
     this.markModified('vapid');
   }
+
   next();
 });
 
@@ -486,6 +513,11 @@ clientSchema.set('toJSON', {
     if (ret.vapid?.privateKeyCipher) {
       ret.vapid.privateKey = decrypt(ret.vapid.privateKeyCipher, ENCRYPTION_KEY);
       ret.vapid.privateKeyCipher = undefined;
+    }
+
+    if (ret.email?.smtp_passCipher) {
+      ret.email.smtp_pass = decrypt(ret.email.smtp_passCipher, ENCRYPTION_KEY);
+      ret.email.smtp_passCipher = undefined;
     }
 
     return ret;
@@ -573,7 +605,7 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
 };
 
 // Method to update a specific CID
-userSchema.methods.updateCID = async function(cid, newDescription, apiUrl, newConfig, postConfig, vapid) {
+userSchema.methods.updateCID = async function(cid, newDescription, apiUrl, newConfig, postConfig, vapid, email) {
   const clientIndex = this.clients.findIndex(client => client.cid === cid);
 
   if (clientIndex === -1) {
@@ -584,6 +616,7 @@ userSchema.methods.updateCID = async function(cid, newDescription, apiUrl, newCo
   this.clients[clientIndex].apiUrl = apiUrl;
   this.clients[clientIndex].postConfig = postConfig;
   this.clients[clientIndex].vapid = vapid;
+  this.clients[clientIndex].email = email;
 
   if (newConfig) {
     const configKeys = Object.keys(newConfig);
@@ -622,7 +655,7 @@ userSchema.methods.decryptConf = function(conf) {
     }
   }
 
-  // Decrypt jwtSecret in modules
+  // Decrypt jwtSecret
   if (decryptedConf.login?.jwtSecretCipher) {
     decryptedConf.login.jwtSecret = decrypt(decryptedConf.login.jwtSecretCipher, ENCRYPTION_KEY);
     decryptedConf.login.jwtSecretCipher = undefined;
@@ -633,14 +666,26 @@ userSchema.methods.decryptConf = function(conf) {
 
 // Method to decrypt vapid
 userSchema.methods.decryptVapid = function(vapid) {
-  vapid = JSON.parse(JSON.stringify(vapid)); // clonar objeto
+  const decryptedVapid = JSON.parse(JSON.stringify(vapid)); // Deep clone
 
-  if (typeof vapid.privateKeyCipher === 'string' && vapid.privateKeyCipher.trim() !== '') {
-    vapid.privateKey = decrypt(vapid.privateKeyCipher, ENCRYPTION_KEY);
-    delete vapid.privateKeyCipher; // destruir el campo original cifrado
+  if (decryptedVapid.privateKeyCipher) {
+    decryptedVapid.privateKey = decrypt(decryptedVapid.privateKeyCipher, ENCRYPTION_KEY);
+    decryptedVapid.privateKeyCipher = undefined;
   }
 
-  return vapid;
+  return decryptedVapid;
+};
+
+// Method to decrypt email
+userSchema.methods.decryptEmail = function(email) {
+  const decryptedEmail = JSON.parse(JSON.stringify(email)); // Deep clone
+
+  if (decryptedEmail.smtp_passCipher) {
+    decryptedEmail.smtp_pass = decrypt(decryptedEmail.smtp_passCipher, ENCRYPTION_KEY);
+    decryptedEmail.smtp_passCipher = undefined;
+  }
+
+  return decryptedEmail;
 };
 
 // Method to add a new client

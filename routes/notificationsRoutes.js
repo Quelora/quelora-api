@@ -12,6 +12,9 @@ router.post('/unsubscribe', [globalRateLimiter, strictRateLimiter, validateClien
 router.post('/validate', [globalRateLimiter, strictRateLimiter, validateClientHeader], notificationsController.validateSubscription);
 
 router.post('/send', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], notificationsController.sendNotification);
+router.post('/send-mail', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], notificationsController.sendMail);
+
+
 router.get('/search', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], notificationsController.searchAuthors);
 router.get('/config.json', [globalRateLimiter, strictRateLimiter], notificationsController.notificationConfig);
 router.get('/generate-vapid-keys', [globalRateLimiter, strictRateLimiter], notificationsController.generateVapidKeys);

@@ -28,8 +28,9 @@ exports.generateToken = async (req, res) => {
       cid: client.cid,
       description: client.description,
       config: encryptJSON( user.decryptConf(client.config), generateKeyFromString(client.cid)),
-      postConfig: client.postConfig,
-      vapid: user.decryptVapid(client.vapid)
+      postConfig: encryptJSON( user.decryptConf(client.postConfig), generateKeyFromString(client.cid)),
+      vapid: encryptJSON(user.decryptVapid(client.vapid), generateKeyFromString(client.cid)),
+      email: encryptJSON(user.decryptEmail(client.email), generateKeyFromString(client.cid)),
     }));
 
     const token = generateToken(

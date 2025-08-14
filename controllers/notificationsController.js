@@ -1,7 +1,61 @@
 const Profile = require('../models/Profile');
 const webPush = require('web-push');
-const { addNotificationJob } = require('../services/pushService');
+const { addPushJob } = require('../services/pushService');
+const { sendMail } = require('../services/emailService');
 const profileService = require('../services/profileService');
+
+exports.sendMail = async (req, res) => {
+  try {
+    const { cid, email, title: subject, body } = req.body;
+    const author  = req.user.author;
+
+    // Validación básica de los campos requeridos
+    if (!cid || !email || !subject || !body) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: cid, email, title or body'
+      });
+    }
+
+    // Enviar el correo electrónico
+    const mailInfo = await sendMail(cid, author, subject, body, email);
+
+    // Respuesta exitosa
+    return res.status(200).json({
+      success: true,
+      message: 'Email sent successfully',
+      data: {
+        messageId: mailInfo.messageId,
+        accepted: mailInfo.accepted,
+        rejected: mailInfo.rejected
+      }
+    });
+
+  } catch (error) {
+    console.error('Error sending email:', error.message);
+    
+    // Manejo de diferentes tipos de errores
+    let statusCode = 500;
+    let errorMessage = 'Failed to send email';
+
+    if (error.message.includes('No email configuration found')) {
+      statusCode = 404;
+      errorMessage = 'Email configuration not found for this client';
+    } else if (error.message.includes('No email found for user')) {
+      statusCode = 404;
+      errorMessage = 'Recipient email not found';
+    } else if (error.message.includes('Invalid email')) {
+      statusCode = 400;
+      errorMessage = 'Invalid email address';
+    }
+
+    return res.status(statusCode).json({
+      success: false,
+      message: errorMessage,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
 
 exports.subscribeProfile = async (req, res) => {
   try {
@@ -110,7 +164,7 @@ exports.sendNotification = async (req, res) => {
       return res.status(400).json({ error: 'title and body are required' });
     }
 
-    const job = await addNotificationJob(cid, author, title, body, data || {});
+    const job = await addPushJob(cid, author, title, body, data || {});
     
     res.json({ 
       success: true,
@@ -241,3 +295,4 @@ exports.generateVapidKeys = async (req, res) => {
     res.status(500).json({ error: 'Failed to generate VAPID keys' });
   }
 };
+

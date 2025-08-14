@@ -3,6 +3,7 @@ const IORedis = require('ioredis');
 const nodemailer = require('nodemailer');
 const Profile = require('../models/Profile');
 const { randomUUID } = require('crypto');
+const getClientConfig = require('./clientConfigService');
 
 const connection = new IORedis(process.env.CACHE_REDIS_URL, {
   maxRetriesPerRequest: null,
@@ -26,17 +27,6 @@ const emailQueue = new Queue('emails', {
   },
 });
 
-// Nodemailer transporter configuration
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT) || 587,
-  secure: process.env.SMTP_PORT === '465',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
-
 // Worker processing logic for emails
 const emailWorker = new Worker('emails', async job => {
   const { cid, author, subject, body, to } = job.data;
@@ -49,14 +39,31 @@ const emailWorker = new Worker('emails', async job => {
       return;
     }
 
+    // Get client-specific email config
+    const emailConfig = await getClientConfig.getClientEmailConfig(cid);
+    if (!emailConfig) {
+      throw new Error(`No email configuration found for client ${cid}`);
+    }
+
+    // Create transporter with client-specific config
+    const clientTransporter = nodemailer.createTransport({
+      host: emailConfig.smtp_host,
+      port: parseInt(emailConfig.smtp_port) || 587,
+      secure: emailConfig.smtp_port === '465',
+      auth: {
+        user: emailConfig.smtp_user,
+        pass: emailConfig.smtp_pass,
+      },
+    });
+
     const mailOptions = {
-      from: process.env.SMTP_USER,
+      from: emailConfig.smtp_user,
       to: to || profile.email,
       subject,
-      text: body,
+      html: body,
     };
 
-    await transporter.sendMail(mailOptions);
+    await clientTransporter.sendMail(mailOptions);
   } catch (error) {
     console.error(`Email processing failed for ${author}: ${error.message}`);
     if (error.responseCode === 429) {
@@ -90,6 +97,52 @@ if (process.env.WORKER_MONITOR_INTERVAL_MS) {
   setInterval(monitorQueue, parseInt(process.env.WORKER_MONITOR_INTERVAL_MS));
 }
 
+// Send mail function with client-specific configuration
+const sendMail = async (cid, author, subject, body, to = null) => {
+  try {
+    // Get client email config
+    const emailConfig = await getClientConfig.getClientEmailConfig(cid);
+    if (!emailConfig) {
+      throw new Error(`No email configuration found for client ${cid}`);
+    }
+
+    // Create transporter with client-specific config
+    const transporter = nodemailer.createTransport({
+      host: emailConfig.smtp_host,
+      port: parseInt(emailConfig.smtp_port) || 587,
+      secure: emailConfig.smtp_port === '465',
+      auth: {
+        user: emailConfig.smtp_user,
+        pass: emailConfig.smtp_pass,
+      },
+    });
+
+    // Get recipient email from profile if not provided
+    let recipientEmail = to;
+    if (!recipientEmail) {
+      const profile = await Profile.findOne({ author, cid });
+      if (!profile || !profile.email) {
+        throw new Error(`No email found for user ${author} in client ${cid}`);
+      }
+      recipientEmail = profile.email;
+    }
+
+    const mailOptions = {
+      from: emailConfig.smtp_user,
+      to: recipientEmail,
+      subject,
+      html: body,
+    };
+
+    // Send email directly (not through queue)
+    const info = await transporter.sendMail(mailOptions);
+    return info;
+  } catch (error) {
+    console.error(`Failed to send email to ${to || author}: ${error.message}`);
+    throw error;
+  }
+};
+
 module.exports = {
   emailQueue,
   addEmailJob: async (cid, author, subject, body, to = null) => {
@@ -104,4 +157,5 @@ module.exports = {
       jobId
     });
   },
+  sendMail,
 };
