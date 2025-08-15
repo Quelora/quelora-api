@@ -1,21 +1,21 @@
 {
-  "new_follower": {
+  "follower": {
     "title": "Nuevo seguidor",
     "message": "Tienes un nuevo seguidor: {name|bold}"
   },
-  "new_follow_request": {
+  "follow_request": {
     "title": "Nueva solicitud de seguidor",
     "message": "{name|bold} solicitó seguirte"
   },
-  "new_like": {
+  "like": {
     "title": "Nuevo Me gusta",
     "message": "A {name|bold} le gustó tu publicación"
   },
-  "new_comment": {
+  "comment": {
     "title": "Nuevo comentario",
     "message": "{name|bold} comentó en tu publicación: {comment}"
   },
-  "new_comment_followers": {
+  "comment_followers": {
     "title": "Nuevo comentario",
     "message": "{name|bold} comentó la publicación: {post}"
   },

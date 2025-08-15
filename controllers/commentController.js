@@ -24,13 +24,9 @@ const { detectLanguage } = require('../services/languageService');
 const { translateService } = require('../services/translateService');
 const clientConfigService  = require('../services/clientConfigService');
 
-const { sendPushNotification, sendPushNotificationsToFollowers } = require('../services/pushNotificationService');
+const { sendNotificationAndLogActivity } = require('../utils/notificationUtils');
 const profileService = require('../services/profileService');
-
 const { recordGeoActivity, recordActivityHit } = require('../utils/recordStatsActivity');
-const { enrichLikesWithFollowStatus } = require('../utils/followStatusUtils');
-
-const activityService = require('../services/activityService');
 
 const LIMIT_COMMENTS = parseInt(process.env.LIMIT_COMMENTS, 5) || 5;
 
@@ -218,7 +214,6 @@ exports.addComment = async (req, res, next) => {
   try {
     const { entity } = req.params;
     const cid = req.cid;
-    
     const clientConfig = await clientConfigService.getClientPostConfig(cid);
 
     const { text, audio, hash, defaultLanguage, scores, post, author } = await processComment({
@@ -228,12 +223,13 @@ exports.addComment = async (req, res, next) => {
       clientConfig
     });
 
-    const allow_save_audio = getFirstDefined( post.config?.audio?.save_comment_audio,
-                                              clientConfig?.audio?.save_comment_audio,
-                                              Post.getDefaultConfig().audio.save_comment_audio,
-                                            );
-                                           
-    if( allow_save_audio && audio ) await validateAudio(text, audio, hash, post, clientConfig);
+    const allow_save_audio = getFirstDefined(
+      post.config?.audio?.save_comment_audio,
+      clientConfig?.audio?.save_comment_audio,
+      Post.getDefaultConfig().audio.save_comment_audio
+    );
+
+    if (allow_save_audio && audio) await validateAudio(text, audio, hash, post, clientConfig);
 
     const profile = await Profile.ensureProfileExists(req.user, req.cid, req.geoData || null);
 
@@ -267,29 +263,25 @@ exports.addComment = async (req, res, next) => {
       created_at: new Date()
     });
 
-    await profileService.deleteProfileCache(cid, author);
-    await cacheService.delete(`cid:${cid}:thread:${entity}:limit:${LIMIT_COMMENTS}:last:initial`);
-
     await recordGeoActivity(req, 'comment');
     await recordActivityHit(`activity:comments:${req.cid}`, 'added');
 
-    //Notify all followers
-    await sendPushNotificationsToFollowers(cid, author, 'new_comment_followers.title','new_comment_followers.message', { 'name':profile.name, 'post':post.description }, {entity, commentId: newComment._id} ,'comment');
+    // Enviar notificación y registrar actividad
+    await sendNotificationAndLogActivity({
+      req,
+      cid,
+      entity,
+      postId: post._id,
+      commentId: newComment._id,
+      actionType: 'comment',
+      notificationType: 'comment_followers',
+      targetPreview: post.description,
+      cacheKeys: [`cid:${cid}:thread:${entity}:limit:${LIMIT_COMMENTS}:last:initial`]
+    });
 
     const authorProfile = await Profile.findOne({ author }).select('author name given_name family_name picture locale created_at');
     const formattedComment = formatComment(newComment, authorProfile, author);
 
-    await activityService.logActivity({
-      author: { _id: profile._id, username: profile.name, picture:  profile.picture },
-      actionType: 'comment',
-      target: {
-        type: 'post',
-        id: post._id,
-        preview: post.description?.substring(0, 50) + '...'
-      },
-      references: { entity, commentId: newComment._id }
-    });
-    
     res.status(201).json({ message: 'Comment added successfully.', comment: formattedComment });
     next();
   } catch (error) {
@@ -302,7 +294,6 @@ exports.addReply = async (req, res, next) => {
   try {
     const { entity, comment } = req.params;
     const cid = req.cid;
-    
     const clientConfig = await clientConfigService.getClientPostConfig(cid);
 
     const { text, audio, hash, defaultLanguage, scores, post, author } = await processComment({
@@ -313,15 +304,16 @@ exports.addReply = async (req, res, next) => {
       clientConfig
     });
 
-    const allow_save_audio = getFirstDefined( post.config?.audio?.save_comment_audio,
-                                              clientConfig?.audio?.save_comment_audio,
-                                              false
-                                            );
+    const allow_save_audio = getFirstDefined(
+      post.config?.audio?.save_comment_audio,
+      clientConfig?.audio?.save_comment_audio,
+      false
+    );
 
-    if( allow_save_audio && audio ) await validateAudio(text, audio, hash, post, clientConfig);
-    
+    if (allow_save_audio && audio) await validateAudio(text, audio, hash, post, clientConfig);
+
     const profile = await Profile.ensureProfileExists(req.user, req.cid, req.geoData || null);
-    
+
     const reply = {
       _id: new mongoose.Types.ObjectId(),
       entity,
@@ -347,7 +339,6 @@ exports.addReply = async (req, res, next) => {
       await processAudio(reply._id, audio, hash);
     }
 
-
     await ProfileComment.create({
       profile_id: profile._id,
       post_id: post._id,
@@ -355,32 +346,30 @@ exports.addReply = async (req, res, next) => {
       created_at: new Date()
     });
 
-    await profileService.deleteProfileCache(cid, author);
-    await cacheService.delete(`cid:${cid}:thread:${entity}:${comment}:limit:${LIMIT_COMMENTS}:last:none`);
-
     await recordGeoActivity(req, 'reply');
     await recordActivityHit(`activity:replies:${req.cid}`, 'added');
 
+    const commentDoc = await Comment.findById(comment).select('author text cid');
+    if (author !== commentDoc.author) {
+      await sendNotificationAndLogActivity({
+        req,
+        cid,
+        entity,
+        postId: post._id,
+        commentId: comment,
+        replyId: reply._id,
+        actionType: 'reply',
+        notificationType: 'comment',
+        recipient: commentDoc.author,
+        targetPreview: commentDoc.text,
+        cacheKeys: [
+          `cid:${cid}:thread:${entity}:${comment}:limit:${LIMIT_COMMENTS}:last:none`
+        ]
+      });
+    }
+
     const authorProfile = await Profile.findOne({ author, cid }).select('author name given_name family_name picture locale created_at');
     const formattedReply = formatComment(reply, authorProfile, author);
-
-    const commentDoc = await Comment.findById(comment).select('author text cid');
-    if(author != commentDoc.author){
-      await sendPushNotification( cid, commentDoc.author, 'new_comment.title', 'new_comment.message', {'name':profile.name, 'comment':commentDoc.text}, {entity, commentId: comment, replyId: reply._id} ,'reply');
-
-    }
-    
-    await activityService.logActivity({
-      author: { _id: profile._id, username: profile.name, picture:  profile.picture },
-      actionType: 'reply',
-      target: {
-        type: 'reply',
-        id: post._id,
-        preview: post.description?.substring(0, 50) + '...'
-      },
-      references: {entity, commentId: comment, replyId: reply._id} ,
-    });
-    
 
     res.status(201).json({ message: 'Reply added successfully.', comment: formattedReply });
     next();
@@ -470,8 +459,7 @@ exports.likeComment = async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid entity or comment ID' });
     }
 
-    const post = await Post.findOne({  entity, cid, 'deletion.status': 'active' }).select('config.interaction.allow_likes');
-
+    const post = await Post.findOne({ entity, cid, 'deletion.status': 'active' }).select('config.interaction.allow_likes');
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
     }
@@ -481,7 +469,6 @@ exports.likeComment = async (req, res, next) => {
     }
 
     const commentDoc = await Comment.findOne({ _id: comment, post: post._id, visible: true });
-
     if (!commentDoc) {
       return res.status(404).json({ message: 'Comment not found or not visible' });
     }
@@ -496,52 +483,36 @@ exports.likeComment = async (req, res, next) => {
     let updatedComment;
     if (existingLike) {
       await existingLike.deleteOne();
-
       updatedComment = await Comment.decrementLikes(comment, author);
       await cacheService.delete(`cid:${cid}:commentLikes:${comment}`);
       await profileService.deleteProfileCache(cid, author);
       await recordActivityHit(`activity:likes:${cid}`, 'removed');
-
     } else {
       await ProfileLike.create({ profile_id: profile._id, fk_id: comment, fk_type: 'comment', created_at: new Date() });
-
       updatedComment = await Comment.incrementLikes(comment, author);
-      await cacheService.delete(`cid:${cid}:commentLikes:${comment}`);
-      await profileService.deleteProfileCache(cid, author);
       await recordGeoActivity(req, 'like');
       await recordActivityHit(`activity:likes:${cid}`, 'added');
 
       const getBaseComment = await Comment.getBaseComment(comment);
-
-      let commentId, replyId = '';
+      const commentId = String(getBaseComment._id) === String(comment) ? comment : getBaseComment._id;
+      const replyId = String(getBaseComment._id) === String(comment) ? null : comment;
 
       if (author !== commentDoc.author) {
-        commentId = String(getBaseComment._id) === String(comment) ? comment : getBaseComment._id;
-        replyId = String(getBaseComment._id) === String(comment) ? null : comment;
-
-        await sendPushNotification(
+        await sendNotificationAndLogActivity({
+          req,
           cid,
-          commentDoc.author,
-          'new_like.title',
-          'new_like.message',
-          { name: profile.name },
-          { entity, commentId, replyId },
-          'like'
-        );
+          entity,
+          postId: post._id,
+          commentId,
+          replyId,
+          actionType: 'like',
+          notificationType: 'like',
+          recipient: commentDoc.author,
+          targetPreview: commentDoc.text,
+          cacheKeys: [`cid:${cid}:commentLikes:${comment}`]
+        });
       }
-
-      await activityService.logActivity({
-        author: { _id: profile._id, username: profile.name, picture:  profile.picture },
-        actionType: 'like',
-        target: {
-          type: 'comment',
-          id: commentDoc._id,
-          preview: commentDoc?.text.substring(0, 50) + '...'
-        },
-        references: { entity, commentId, replyId }
-      });
     }
-
 
     const response = {
       liked: !existingLike,

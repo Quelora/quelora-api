@@ -41,7 +41,7 @@ async function getLocalizedMessage(message, locale, variables = {}) {
   const translations = await loadTranslation(locale);
   let translated = message;
 
-  // Buscar mensaje en las traducciones (ejemplo: 'new_like.message')
+  // Buscar mensaje en las traducciones (ejemplo: 'like.message')
   const keyParts = message.split('.');
   let current = translations;
   for (const part of keyParts) {

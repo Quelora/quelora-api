@@ -7,9 +7,8 @@ const ProfileFollower = require('../models/ProfileFollower');
 const ProfileFollowing = require('../models/ProfileFollowing');
 const ProfileFollowRequest = require('../models/ProfileFollowRequest');
 
-const { sendPushNotification } = require('../services/pushNotificationService');
+const { sendNotificationAndLogActivity } = require('../utils/notificationUtils');
 
-const activityService = require('../services/activityService');
 const profileService = require('../services/profileService');
 
 const fs = require('fs').promises;
@@ -189,18 +188,17 @@ exports.followUser = async (req, res, next) => {
       
       await ProfileFollowRequest.create({ profile_id: currentProfile._id, target_id: profileToFollow._id, status: 'pending', created_at: Date.now() });
 
-      await sendPushNotification( cid,
-                                  profileToFollow.author,
-                                  'new_follow_request.title',
-                                  'new_follow_request.message',
-                                  { name: currentProfile.name },
-                                  { followRequest: currentProfile.author, icon: currentProfile.picture },
-                                  'follow_request');
-
-      await activityService.logActivity({ author: {  _id: currentProfile._id,  username: currentProfile.name, picture: currentProfile.picture },
-                                          actionType: 'follower-request',
-                                          targetProfile: { _id: profileToFollow._id },
-                                          references: { profileId: currentProfile._id }});
+      await sendNotificationAndLogActivity({
+        req,
+        cid,
+        entity: null,
+        postId: null,
+        actionType: 'follower-request',
+        notificationType: 'follow_request',
+        recipient: profileToFollow.author,
+        targetPreview: null,
+        cacheKeys: []
+      });
       
       await profileService.deleteProfileCache(cid, currentProfile.author);
       await profileService.deleteProfileCache(cid, profileToFollow.author);
@@ -216,19 +214,17 @@ exports.followUser = async (req, res, next) => {
       await profileService.deleteProfileCache(cid, currentProfile.author);
       await profileService.deleteProfileCache(cid, profileToFollow.author);
 
-      await sendPushNotification( cid,
-                                  profileToFollow.author, 
-                                  'new_follower.title', 
-                                  'new_follower.message', 
-                                  { name: currentProfile.name }, 
-                                  { follow: currentProfile.author, icon: currentProfile.picture }, 
-                                  'follower' );
-
-      await activityService.logActivity({ author: {  _id: currentProfile._id,  username: currentProfile.name, picture: currentProfile.picture },
-                                          actionType: 'follower',
-                                          targetProfile: { _id: profileToFollow._id },
-                                          references: { profileId: currentProfile._id }});
-
+      await sendNotificationAndLogActivity({
+        req,
+        cid,
+        entity: null,
+        postId: null,
+        actionType: 'follower',
+        notificationType: 'follower',
+        recipient: profileToFollow.author,
+        targetPreview: null,
+        cacheKeys: []
+      });
 
       //Single source of truth
       const updatedProfile =  await profileService.getSingleSourceOfTruthProfile(author, cid);
@@ -309,29 +305,18 @@ exports.approveFollowRequest = async (req, res, next) => {
       followRequest.responded_at = Date.now();
       await followRequest.save();
 
-      await sendPushNotification(
+      await sendNotificationAndLogActivity({
+        req,
         cid,
-        followRequest.profile_id.author,
-        'follow_request_approved.title',
-        'follow_request_approved.message',
-        { name: targetProfile.name },
-        { profile: targetProfile.author, icon: targetProfile.picture },
-        'follow_approved'
-      );
-
-      await activityService.logActivity({
-        author: {
-          _id: targetProfile._id,
-          username: targetProfile.name,
-          picture: targetProfile.picture
-        },
+        entity: null,
+        postId: null,
         actionType: 'follow-approval',
-        targetProfile: { _id: followRequest.profile_id._id },
-        references: { 
-          requestId: followRequest._id,
-          approvedProfile: targetProfile._id
-        }
+        notificationType: 'follow_approved',
+        recipient: followRequest.profile_id.author,
+        targetPreview: null,
+        cacheKeys: []
       });
+
     } else {
       followRequest.status = 'rejected';
       followRequest.responded_at = Date.now();
