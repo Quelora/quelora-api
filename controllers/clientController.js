@@ -4,7 +4,7 @@ const User = require('../models/User');
 const Profile = require('../models/Profile');
 const Post = require('../models/Post');
 const Comment  = require('../models/Comment');
-
+const os = require('os');
 const { decryptJSON, generateKeyFromString } = require('../utils/cipher');
 const clientConfigService = require('../services/clientConfigService');
 
@@ -645,10 +645,9 @@ exports.testDiscovery = async (req, res, next) => {
   }
 };
 
-exports.getLogs = (req, res) => {
+exports.getMonitoring = async (req, res) => {
   const { from, level } = req.query;
   let logs = getLogs();
-
   if (from) {
     const fromDate = new Date(from);
     if (!isNaN(fromDate)) {
@@ -660,5 +659,46 @@ exports.getLogs = (req, res) => {
     logs = logs.filter(log => log.level.toLowerCase() === level.toLowerCase());
   }
 
-  res.json(logs);
+  const appStats = {
+      system: {
+        cpus: os.cpus().length,
+        totalMemory: os.totalmem(),
+        freeMemory: os.freemem(),
+        loadAvg: os.loadavg(),
+        uptime: os.uptime()
+      },
+      process: {
+        memoryUsage: process.memoryUsage(),
+        uptime: process.uptime(),
+        version: process.version
+      }
+    };
+
+    const db = mongoose.connection.db;
+    const [dbStats, serverStatus] = await Promise.all([
+      db.stats(),
+      db.admin().serverStatus()
+    ]);
+
+    const mongoStats = {
+      connections: serverStatus.connections,
+      operations: serverStatus.opcounters,
+      memory: serverStatus.mem,
+      storage: {
+        total: dbStats.storageSize,
+        data: dbStats.dataSize,
+        indexes: dbStats.indexSize
+      },
+      version: serverStatus.version
+    };
+
+    res.status(200).json({
+      success: true,
+      data: {
+        timestamp: new Date(),
+        app: appStats,
+        database: mongoStats,
+        logs
+      }
+    });
 };

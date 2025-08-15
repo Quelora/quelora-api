@@ -26,6 +26,6 @@ router.get('/test', [ ], clientController.testDiscovery);
 
 router.get('/users', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], clientController.getUsersByClient);
 
-router.get('/logs', [globalRateLimiter, strictRateLimiter,adminAuthMiddleware], clientController.getLogs);
+router.get('/logs', [globalRateLimiter, strictRateLimiter,adminAuthMiddleware], clientController.getMonitoring);
 
 module.exports = router;
