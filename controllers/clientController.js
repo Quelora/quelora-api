@@ -7,7 +7,7 @@ const Comment  = require('../models/Comment');
 const os = require('os');
 const { decryptJSON, generateKeyFromString } = require('../utils/cipher');
 const clientConfigService = require('../services/clientConfigService');
-
+const puppeteerService = require('../services/puppeteerService');
 const { getLogs } = require('../services/loggerService');
 
 exports.upsertClient = async (req, res) => {
@@ -568,8 +568,10 @@ exports.getClientPosts = async (req, res) => {
 exports.moderationTest = async (req, res) => {
   try {
     const { cid, text, config } = req.body;
+    console.log(`🔎 Moderating content for CID: ${cid}`);
     const { moderateService } = require('../services/moderateService');
     const { isRejected, reason } = await moderateService(cid, text, config);
+    console.log(`✅ Moderation complete: ${isRejected ? 'Rejected' : 'Approved'}`);
 
     res.json({ 
       success: true,
@@ -577,13 +579,14 @@ exports.moderationTest = async (req, res) => {
       reason: reason
     });
   } catch (error) {
+    console.error('🚫 Error in moderationTest:', error);
     const statusCode = error.message.includes('CID not found') ? 404 : 500;
     res.status(statusCode).json({ 
       success: false,
       error: error.message || 'Internal error' 
     });
   }
-}
+};
 
 exports.deleteClient = async (req, res, next) => {
   try {
@@ -632,15 +635,18 @@ exports.testDiscovery = async (req, res, next) => {
 
   try {
     if (!url) {
+      console.warn('⚠️ URL parameter is required');
       return res.status(400).json({ success: false, error: "URL parameter is required" });
     }
 
+    console.log(`🌐 Attempting to scrape URL: ${url}`);
     const result = await puppeteerService.scrapePageData(url);
     await puppeteerService.closeBrowser();
+    console.log('✅ Page scraped successfully');
     
     res.json({ success: true, ...result });
   } catch (error) {
-    console.error('Error in testDiscovery:', error);
+    console.error('🔍 Error in testDiscovery:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };

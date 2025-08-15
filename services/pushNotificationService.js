@@ -30,7 +30,6 @@ async function sendPushNotificationsToFollowers(cid, author, title, message, dat
 
   const followers = await ProfileFollower.find({ profile_id: profile._id }).populate('follower_id');
   if (!followers || followers.length === 0) {
-    //console.warn(`No followers found for user ${author}`);
     return;
   }
 

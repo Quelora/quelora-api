@@ -10,8 +10,6 @@ const ProfileBookmark = require('../models/ProfileBookmark');
 const { cacheClient, cacheService } = require('./cacheService');
 const { validateSearchQuery } = require('../utils/textUtils');
 
-const geohash = require('ngeohash');
-
 /**
  * Generates the main cache key for a profile including options
  * @param {string} cid - Client ID
