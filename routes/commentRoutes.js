@@ -1,25 +1,29 @@
-// ./routes/commentRoutes.js
+// ./routes/authRoutes.js
 const express = require('express');
 const router = express.Router();
-const commentController = require('../controllers/commentController');
-const authMiddleware = require('../middlewares/authMiddleware');
-
+const clientController = require('../controllers/clientController');
 const { globalRateLimiter, strictRateLimiter } = require('../middlewares/rateLimiterMiddleware');
+const adminAuthMiddleware = require('../middlewares/adminAuthMiddleware');
+
+router.post('/generate-cid', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], clientController.upsertClient);
+router.put('/update-cid', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], clientController.upsertClient);
+
+router.post('/upsert', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], clientController.upsertClient);
+
+router.get('/posts', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], clientController.getClientPosts);
+router.get('/posts/:postId/', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], clientController.getPostComments);
+router.put('/upsert-post',[ globalRateLimiter, strictRateLimiter, adminAuthMiddleware], clientController.upsertPost);
 
 
-router.post('/:entity/comment', [globalRateLimiter, strictRateLimiter, authMiddleware], commentController.addComment);
-router.post('/:entity/comment/:comment/reply',[globalRateLimiter, strictRateLimiter, authMiddleware],commentController.addReply);
+router.patch('/trash',[globalRateLimiter, strictRateLimiter, adminAuthMiddleware], clientController.trashPost);
+router.patch('/restore', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], clientController.restorePostFromTrash);
 
-router.put('/:entity/comment/:comment/like', [globalRateLimiter, strictRateLimiter, authMiddleware], commentController.likeComment);
-router.delete('/:entity/comment/:comment/delete', [globalRateLimiter, strictRateLimiter, authMiddleware ], commentController.deleteComment);
-router.patch('/:entity/comment/:comment/edit', [globalRateLimiter, strictRateLimiter, authMiddleware], commentController.editComment);
+router.post('/moderation', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], clientController.moderationTest);
 
-router.post('/:entity/comment/:comment/report', [globalRateLimiter, strictRateLimiter, authMiddleware], commentController.reportComment);
+router.delete('/delete/:cid', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], clientController.deleteClient);
 
-router.get('/likes/:entity', [globalRateLimiter, strictRateLimiter, authMiddleware], commentController.getPostLikes);
-router.get('/likes/:entity/comments/:commentId', [globalRateLimiter, strictRateLimiter, authMiddleware], commentController.getLikes);
-router.get('/:entity/comment/:comment/translate', [globalRateLimiter, strictRateLimiter, authMiddleware], commentController.translateComment);
+router.get('/test', [ ], clientController.testDiscovery);
 
-router.get('/audio/:comment', [globalRateLimiter, strictRateLimiter, authMiddleware], commentController.getCommentAudio );
+router.get('/users', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], clientController.getUsersByClient);
 
 module.exports = router;

@@ -1,8 +1,14 @@
 // ./controllers/clientController.js
 const mongoose = require('mongoose');
 const User = require('../models/User');
+const Profile = require('../models/Profile');
+const Post = require('../models/Post');
+const Comment  = require('../models/Comment');
+
 const { decryptJSON, generateKeyFromString } = require('../utils/cipher');
 const clientConfigService = require('../services/clientConfigService');
+
+const { getLogs } = require('../services/loggerService');
 
 exports.upsertClient = async (req, res) => {
   try {
@@ -639,3 +645,20 @@ exports.testDiscovery = async (req, res, next) => {
   }
 };
 
+exports.getLogs = (req, res) => {
+  const { from, level } = req.query;
+  let logs = getLogs();
+
+  if (from) {
+    const fromDate = new Date(from);
+    if (!isNaN(fromDate)) {
+      logs = logs.filter(log => new Date(log.time) > fromDate);
+    }
+  }
+
+  if (level) {
+    logs = logs.filter(log => log.level.toLowerCase() === level.toLowerCase());
+  }
+
+  res.json(logs);
+};
