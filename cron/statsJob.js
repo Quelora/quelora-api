@@ -4,7 +4,7 @@ const { saveStats, saveGeoStats, savePostViews } = require('../services/statsSer
 
 
 // Ejecutar el job cada 10 segundos
-cron.schedule('*/10 * * * * *', async () => {
+cron.schedule('0 */1 * * * *', async () => {
   console.log('⏲️  Running statistics job');
   await saveStats();
   await savePostViews();

@@ -9,15 +9,12 @@ const { globalRateLimiter, strictRateLimiter } = require('../middlewares/rateLim
 
 router.post('/subscribe', [globalRateLimiter, strictRateLimiter, validateClientHeader, authMiddleware], notificationsController.subscribeProfile);
 router.post('/unsubscribe', [globalRateLimiter, strictRateLimiter, validateClientHeader, authMiddleware], notificationsController.unsubscribeProfile);
-router.post('/validate', [globalRateLimiter, strictRateLimiter, validateClientHeader], notificationsController.validateSubscription);
+router.post('/validate', [globalRateLimiter, strictRateLimiter, validateClientHeader, authMiddleware], notificationsController.validateSubscription);
 
 router.post('/send', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], notificationsController.sendNotification);
 router.post('/send-mail', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], notificationsController.sendMail);
 
-
 router.get('/search', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], notificationsController.searchAuthors);
-router.get('/config.json', [globalRateLimiter, strictRateLimiter], notificationsController.notificationConfig);
-router.get('/generate-vapid-keys', [globalRateLimiter, strictRateLimiter], notificationsController.generateVapidKeys);
-
+router.get('/generate-vapid-keys', [globalRateLimiter, strictRateLimiter, adminAuthMiddleware], notificationsController.generateVapidKeys);
 
 module.exports = router;    

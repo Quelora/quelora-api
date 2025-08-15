@@ -7,20 +7,16 @@ const profileService = require('../services/profileService');
 exports.sendMail = async (req, res) => {
   try {
     const { cid, email, title: subject, body } = req.body;
-    const author  = req.user.author;
+    const author = req.user.author;
 
-    // Validación básica de los campos requeridos
     if (!cid || !email || !subject || !body) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required fields: cid, email, title or body'
-      });
+      console.warning('⚠️ Validation error: Missing required fields');
+      return res.status(400).json({ success: false, message: 'Missing required fields: cid, email, title or body'});
     }
 
-    // Enviar el correo electrónico
     const mailInfo = await sendMail(cid, author, subject, body, email);
+    console.log('📧 Email sent successfully:', { messageId: mailInfo.messageId, subjectMail: subject });
 
-    // Respuesta exitosa
     return res.status(200).json({
       success: true,
       message: 'Email sent successfully',
@@ -32,9 +28,7 @@ exports.sendMail = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error sending email:', error.message);
-    
-    // Manejo de diferentes tipos de errores
+    console.error('❌ Error sending email:', error.message);
     let statusCode = 500;
     let errorMessage = 'Failed to send email';
 
@@ -64,9 +58,7 @@ exports.subscribeProfile = async (req, res) => {
     const cid = req.cid;
 
     if (!subscriptionId || !endpoint || !keys || !keys.p256dh || !keys.auth) {
-      return res.status(400).json({ 
-        error: 'Incomplete subscription data' 
-      });
+      return res.status(400).json({ error: 'Incomplete subscription data' });
     }
 
     const subscriptionData = {
@@ -108,14 +100,7 @@ exports.subscribeProfile = async (req, res) => {
       );
     }
 
-    //await sendPushNotification(cid, author, 'welcome_message.title', 'welcome_message.message', {name: profile.name});
-
-    res.json({ 
-      success: true,
-      message: existingSubIndex >= 0 ? 'Subscription updated' : 'Subscription created',
-      subscriptionId
-    });
-
+    res.json({ success: true, message: existingSubIndex >= 0 ? 'Subscription updated' : 'Subscription created', subscriptionId });
   } catch (error) {
     console.error('Subscription error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -141,10 +126,7 @@ exports.unsubscribeProfile = async (req, res) => {
       return res.status(404).json({ error: 'Subscription not found' });
     }
 
-    res.json({ 
-      success: true,
-      message: 'Unsubscribed successfully'
-    });
+    res.json({ success: true, message: 'Unsubscribed successfully' });
 
   } catch (error) {
     console.error('Unsubscribe error:', error);
@@ -157,23 +139,21 @@ exports.sendNotification = async (req, res) => {
     const { cid, author, title, body, data } = req.body;
 
     if (!author) {
+      console.warn('⚠️ Validation error: Author is required');
       return res.status(400).json({ error: 'author is required' });
     }
 
     if (!title || !body) {
+      console.warn('⚠️ Validation error: Title and body are required');
       return res.status(400).json({ error: 'title and body are required' });
     }
 
     const job = await addPushJob(cid, author, title, body, data || {});
-    
-    res.json({ 
-      success: true,
-      message: 'Notification queued',
-      jobId: job.id
-    });
+    console.log('🔔 Notification queued successfully:', { jobId: job.id });
+    res.json({ success: true, message: 'Notification queued', jobId: job.id });
 
   } catch (error) {
-    console.error('Notification error:', error);
+    console.error('❌ Notification error:', error);
     res.status(500).json({ error: 'Failed to queue notification' });
   }
 };
@@ -212,87 +192,41 @@ exports.validateSubscription = async (req, res) => {
     const { subscriptionId } = req.body;
 
     if (!subscriptionId) {
-      return res.status(400).json({ 
-        error: 'subscriptionId is required' 
-      });
+      return res.status(400).json({  error: 'subscriptionId is required' });
     }
 
     const clientId = req.headers['x-client-id'];
     if (!clientId) {
-      return res.status(400).json({ 
-        error: 'X-Client-Id header is required' 
-      });
+      return res.status(400).json({ error: 'X-Client-Id header is required' });
     }
 
-    const profile = await Profile.findOne({
-      'pushSubscriptions.subscriptionId': subscriptionId
-    });
+    const profile = await Profile.findOne({ 'pushSubscriptions.subscriptionId': subscriptionId });
 
     if (!profile) {
-      return res.status(200).json({ 
-        active: false
-      });
+      return res.status(200).json({ active: false });
     }
 
-    const subscription = profile.pushSubscriptions.find(
-      sub => sub.subscriptionId === subscriptionId
-    );
+    const subscription = profile.pushSubscriptions.find( sub => sub.subscriptionId === subscriptionId );
 
     if (!subscription || subscription.permissionGranted === false) {
-      return res.status(200).json({ 
-        active: false
-      });
+      return res.status(200).json({ active: false });
     }
 
     res.status(200).json({  active: true });
 
   } catch (error) {
     console.error('validateSubscription error:', error);
-    res.status(500).json({ 
-      error: 'Internal server error'
-    });
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
-
-exports.notificationConfig= async (req, res) => {
-  res.json({
-       status: `ok`,
-       code: `
-      const { entity, commentId, replyId, follow } = ids;
-      switch (type) {
-        case 'follower':
-          return follow ? \`\${APP_URL}#QUELORA-U-\${follow}\` : APP_URL;
-        case 'reply':
-          return (entity && commentId && replyId)
-            ? \`\${APP_URL}#QUELORA-Q-\${entity}-\${commentId}-\${replyId}\`
-            : APP_URL;
-        case 'comment':
-          return (entity && commentId)
-            ? \`\${APP_URL}#QUELORA-Q-\${entity}-\${commentId}\`
-            : APP_URL;
-        case 'like':
-          return (entity && commentId)
-            ? (replyId
-                ? \`\${APP_URL}#QUELORA-L-\${entity}-\${commentId}-\${replyId}\`
-                : \`\${APP_URL}#QUELORA-L-\${entity}-\${commentId}\`)
-            : APP_URL;
-        default:
-          return APP_URL;
-      }
-    `
-  });
-}
 
 exports.generateVapidKeys = async (req, res) => {
   try {
     const vapidKeys = webPush.generateVAPIDKeys();
-    res.json({
-      publicKey: vapidKeys.publicKey,
-      privateKey: vapidKeys.privateKey
-    });
+    console.log('🔑 VAPID credentials generated.');
+    res.json({ publicKey: vapidKeys.publicKey, privateKey: vapidKeys.privateKey });
   } catch (error) {
-    console.error('Error generating VAPID keys:', error);
+    console.error('❌ Error generating VAPID keys:', error);
     res.status(500).json({ error: 'Failed to generate VAPID keys' });
   }
 };
-
