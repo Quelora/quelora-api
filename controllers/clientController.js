@@ -9,6 +9,7 @@ const { decryptJSON, generateKeyFromString } = require('../utils/cipher');
 const clientConfigService = require('../services/clientConfigService');
 const puppeteerService = require('../services/puppeteerService');
 const { getLogs } = require('../services/loggerService');
+const { cacheClient } = require('../services/cacheService');
 
 exports.upsertClient = async (req, res) => {
   try {
@@ -681,9 +682,10 @@ exports.getMonitoring = async (req, res) => {
     };
 
     const db = mongoose.connection.db;
-    const [dbStats, serverStatus] = await Promise.all([
+    const [dbStats, serverStatus, redisInfo] = await Promise.all([
       db.stats(),
-      db.admin().serverStatus()
+      db.admin().serverStatus(),
+      cacheClient.info()
     ]);
 
     const mongoStats = {
@@ -698,12 +700,28 @@ exports.getMonitoring = async (req, res) => {
       version: serverStatus.version
     };
 
+    const db0Stats = {  keys: await cacheClient.dbSize() }
+    const redisStats = {};
+
+    redisInfo.split('\r\n').forEach(line => {
+      if (line && !line.startsWith('#')) {
+        const [key, value] = line.split(':');
+        if (key && value) {
+          redisStats[key] = isNaN(value) ? value : Number(value);
+        }
+      }
+    });
+
     res.status(200).json({
       success: true,
       data: {
         timestamp: new Date(),
         app: appStats,
         database: mongoStats,
+        cache: {
+          redis: redisStats,
+          db0: db0Stats
+        },
         logs
       }
     });
