@@ -270,7 +270,7 @@ const getProfile = async (author, cid, options = {}) => {
   if (includeActivity && (isSessionUser || profile.settings?.privacy?.showActivity === 'public' || (profile.settings?.privacy?.showActivity === 'followers' && isFollowing))) {
     const [likes, comments, shares] = await Promise.all([
       ProfileLike.find({ profile_id: profile._id }).lean(),
-      Comment.find({ profile_id: profile._id }).lean(),
+      Comment.find({ profile_id: profile._id, visible: true }).lean(),
       ProfileShare.find({ profile_id: profile._id }).lean()
     ]);
 
