@@ -27,7 +27,7 @@
     "title": "Welcome",
     "message": "Welcome to the community, {name|bold}!"
   },
-  "follow_request_approved": {
+  "follow_approved": {
     "title": "Request approved",
     "message": "{name|bold} approved your follow request!"
   }
