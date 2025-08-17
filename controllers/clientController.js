@@ -60,13 +60,13 @@ exports.upsertClient = async (req, res) => {
       }
     };
 
-    let finalConfig = { modeDiscovery: false };
+    let finalConfig = {};
     let finalPostConfig = null;
     let finalVapid = null;
     let finalEmail = null;
 
     try {
-      if (configEncrypted) finalConfig = { ...decryptField(configEncrypted), modeDiscovery: false };
+      if (configEncrypted) finalConfig = { ...decryptField(configEncrypted) };
       if (postConfigEncrypted) finalPostConfig = decryptField(postConfigEncrypted);
       if (vapidEncrypted) finalVapid = decryptField(vapidEncrypted);
       if (emailEncrypted) finalEmail = decryptField(emailEncrypted);
