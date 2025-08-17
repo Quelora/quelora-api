@@ -1,19 +1,20 @@
 // SeedProfiles.js
-
+// CID="QU-ME7HF2BN-E8QD9" TOTAL_PROFILES=10000 node seedFakerUser.js
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
 const { ObjectId } = mongoose.Types;
 const connectDB = require('../db');
 const Profile = require('../models/Profile');
-const geohash = require('ngeohash'); // Asegúrate de instalar: npm install ngeohash
+const geohash = require('ngeohash'); // Ensure installation: npm install ngeohash
+const crypto = require('crypto');
 
-const BATCH_SIZE = 5000; // Tamaño del lote para evitar saturación de memoria
-const TOTAL_PROFILES = 200000; // Total de perfiles a generar
+const BATCH_SIZE = 5000; // Batch size to avoid memory overload
+const TOTAL_PROFILES = process.env.TOTAL_PROFILES || 60000; // Total profiles to generate, override via command
 
-// Conjunto para almacenar nombres de usuario únicos durante la generación
+// Set to store unique usernames during generation
 const usedNames = new Set();
 
-// Lista de ciudades con sus coordenadas (lat, lon)
+// List of cities with their coordinates (lat, lon)
 const CITIES = [
   { name: "Madrid", coords: [40.4168, -3.7038] },
   { name: "Barcelona", coords: [41.3851, 2.1734] },
@@ -38,11 +39,11 @@ const CITIES = [
 ];
 
 /**
- * Genera coordenadas aleatorias alrededor de una ciudad (dispersión de ~10km)
+ * Generates random coordinates around a city (~10km spread)
  */
 const generateRandomCoords = (baseCoords) => {
   const [lat, lon] = baseCoords;
-  // Dispersión de ~0.1 grados (aprox. 11km)
+  // Spread of ~0.1 degrees (approx. 11km)
   const latOffset = (Math.random() - 0.5) * 0.2;
   const lonOffset = (Math.random() - 0.5) * 0.2;
   
@@ -53,21 +54,21 @@ const generateRandomCoords = (baseCoords) => {
 };
 
 /**
- * Genera un ID numérico único de 21 dígitos
+ * Generates a sha256 ID
  */
 const generateUniqueNumericId = () => {
   let id = '';
   while (id.length < 21) {
     id += Math.floor(Math.random() * 10);
   }
-  return id;
+  return crypto.createHash('sha256').update(id).digest('hex');
 };
 
 /**
- * Genera un nombre de usuario único basado en el ID
+ * Generates a unique username based on the ID
  */
 const generateUniqueName = (uid) => {
-  const baseName = `FakeUser${uid.slice(-4)}`;
+  const baseName = `FakeUser${uid}`;
   let name = baseName;
   let counter = 1;
   
@@ -81,23 +82,23 @@ const generateUniqueName = (uid) => {
 };
 
 /**
- * Crea un perfil falso con datos geográficos realistas
+ * Creates a fake profile with realistic geographic data
  */
 const createFakeProfile = (index, timestamp) => {
   const uid = generateUniqueNumericId();
-  const name = generateUniqueName(uid);
+  const name = generateUniqueName(index);
   
-  // Seleccionar una ciudad aleatoria
+  // Select a random city
   const city = CITIES[Math.floor(Math.random() * CITIES.length)];
   const [latitude, longitude] = generateRandomCoords(city.coords);
-  const geoHash = geohash.encode(latitude, longitude, 9); // Precisión de 9 caracteres
+  const geoHash = geohash.encode(latitude, longitude, 9); // 9-character precision
   
   return {
-    cid: 'QU-MCANRO0C-QSD2Z',
+    cid: process.env.CID || 'QU-ME7HF2BN-E8QD9', // Override via command
     author: uid,
     name: name,
-    given_name: `Nombre ${uid.slice(-3)}`,
-    family_name: `Apellido ${uid.slice(-2)}`,
+    given_name: `Name ${uid.slice(-3)}`,
+    family_name: `Surname ${uid.slice(-2)}`,
     picture: `https://i.pravatar.cc/150?img=${(index % 70) + 1}`,
     background: null,
     locale: 'es',
@@ -109,10 +110,10 @@ const createFakeProfile = (index, timestamp) => {
     sharesCount: Math.floor(Math.random() * 20),
     location: {
       city: city.name,
-      country: city.name === 'Palma' ? 'España' : 
-              city.name === 'Las Palmas' ? 'España' : 
-              city.name.split(', ')[1] || 'España',
-      coordinates: [longitude, latitude], // GeoJSON usa [lon, lat]
+      country: city.name === 'Palma' ? 'Spain' : 
+              city.name === 'Las Palmas' ? 'Spain' : 
+              city.name.split(', ')[1] || 'Spain',
+      coordinates: [longitude, latitude], // GeoJSON uses [lon, lat]
       type: 'Point'
     },
     geohash: geoHash,
@@ -149,53 +150,54 @@ const createFakeProfile = (index, timestamp) => {
 };
 
 /**
- * Función principal para sembrar los perfiles en la base de datos
+ * Main function to seed profiles into the database
  */
 async function seedProfiles() {
   try {
-    // Conectar a la base de datos
+    // Connect to the database
     await connectDB();
 
-    console.log('⏳ Eliminando perfiles FakeUser existentes...');
+    console.log('⏳ Deleting existing FakeUser profiles...');
     await Profile.deleteMany({ name: { $regex: /^FakeUser/ } });
 
-    // Asegurarse que el índice geoespacial existe
+    // Ensure geospatial index exists
     await Profile.collection.createIndex({ "location.coordinates": "2dsphere" });
 
-    console.log(`⏳ Generando ${TOTAL_PROFILES} perfiles falsos con datos geográficos...`);
+    console.log(`⏳ Generating ${TOTAL_PROFILES} fake profiles with geographic data...`);
     const now = new Date();
 
-    // Procesar en lotes para mejor rendimiento
+    // Process in batches for better performance
     for (let i = 0; i < TOTAL_PROFILES; i += BATCH_SIZE) {
       const currentBatchSize = Math.min(BATCH_SIZE, TOTAL_PROFILES - i);
       const batch = [];
       
-      // Generar los perfiles del lote actual
+      // Generate profiles for the current batch
       for (let j = 0; j < currentBatchSize; j++) {
         batch.push(createFakeProfile(i + j, now));
       }
 
-      // Verificación adicional de unicidad en el lote
+      // Additional uniqueness check for the batch
       const batchNames = batch.map(p => p.name);
       const uniqueBatchNames = new Set(batchNames);
       
       if (batchNames.length !== uniqueBatchNames.size) {
-        throw new Error('❌ Se detectaron nombres duplicados en el lote actual');
+        throw new Error('❌ Duplicate names detected in the current batch');
       }
 
-      // Insertar el lote en la base de datos
+      // Insert the batch into the database
       await Profile.insertMany(batch);
-      console.log(`✅ Insertados ${i + batch.length} perfiles...`);
+      console.log(`✅ Inserted ${i + batch.length} profiles...`);
     }
 
-    console.log('🎉 Todos los perfiles fueron insertados correctamente con datos geográficos.');
+    console.log('🎉 All profiles were successfully inserted with geographic data.');
   } catch (err) {
-    console.error('❌ Error al insertar perfiles:', err.message);
+    console.error('❌ Error inserting profiles:', err.message);
   } finally {
-    // Cerrar la conexión a la base de datos
-    mongoose.connection.close();
+    // Close the database connection and exit
+    await mongoose.connection.close();
+    process.exit(0); // Exit with success code
   }
 }
 
-// Ejecutar el script
+// Run the script
 seedProfiles();
