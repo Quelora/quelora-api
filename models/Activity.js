@@ -25,7 +25,7 @@ const ActivitySchema = new mongoose.Schema({
         required: true
     },
     target: {
-        type: { type: String, enum: ['post', 'comment','reply', 'profile'], required: false },
+        type: { type: String, enum: ['post', 'comment','reply', 'profile','like'], required: false },
         id: { type: mongoose.Schema.Types.ObjectId, required: false },
         preview: { type: String, required: false, maxlength: 100 }
     },

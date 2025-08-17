@@ -2,6 +2,7 @@ const Profile = require('../models/Profile');
 const ProfileFollower = require('../models/ProfileFollower');
 const ProfileFollowing = require('../models/ProfileFollowing');
 const ProfileFollowRequest = require('../models/ProfileFollowRequest');
+const ProfileBlock = require('../models/ProfileBlock');
 const ProfileLike = require('../models/ProfileLike');
 const Comment = require('../models/Comment');
 const ProfileShare = require('../models/ProfileShare');
@@ -185,7 +186,7 @@ const getProfile = async (author, cid, options = {}) => {
   }
 
   if (includeRelations) {
-    const [followers, following] = await Promise.all([
+    const [followers, following, blocked] = await Promise.all([
       ProfileFollower.find({ profile_id: profile._id })
         .populate({
           path: 'follower_id',
@@ -201,7 +202,8 @@ const getProfile = async (author, cid, options = {}) => {
           match: { cid }
         })
         .limit(25)
-        .lean()
+        .lean(),
+      ProfileBlock.find({ blocker_id: profile._id }).select('blocked_author').lean()
     ]);
 
     const followerPromises = followers.filter(f => f.follower_id).map(async f => {
@@ -262,6 +264,7 @@ const getProfile = async (author, cid, options = {}) => {
 
     result.followers = await Promise.all(followerPromises);
     result.following = await Promise.all(followingPromises);
+    result.blocked = blocked;
   }
 
   if (includeActivity && (isSessionUser || profile.settings?.privacy?.showActivity === 'public' || (profile.settings?.privacy?.showActivity === 'followers' && isFollowing))) {

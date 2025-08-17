@@ -9,13 +9,15 @@ const ProfileComment = require('../models/ProfileComment');
 const ProfileFollower = require('../models/ProfileFollower');
 const ProfileFollowRequest = require('../models/ProfileFollowRequest');
 const ProfileFollowing = require('../models/ProfileFollowing');
-
+const ProfileBlock = require('../models/ProfileBlock');
 const Comment = require('../models/Comment');
 const ReportedComment = require('../models/ReportedComment');
 const CommentAudio = require('../models/CommentAudio');
 
 const formatComment = require('../utils/formatComment');
 const getFirstDefined =  require('../utils/firstDefined');
+const { sendNotificationAndLogActivity } = require('../utils/notificationUtils');
+const { recordGeoActivity, recordActivityHit } = require('../utils/recordStatsActivity');
 
 const { cacheService } = require('../services/cacheService');
 const { toxicityService } = require('../services/toxicityService');
@@ -23,10 +25,7 @@ const { moderateService } = require('../services/moderateService');
 const { detectLanguage } = require('../services/languageService');
 const { translateService } = require('../services/translateService');
 const clientConfigService  = require('../services/clientConfigService');
-
-const { sendNotificationAndLogActivity } = require('../utils/notificationUtils');
 const profileService = require('../services/profileService');
-const { recordGeoActivity, recordActivityHit } = require('../utils/recordStatsActivity');
 
 const LIMIT_COMMENTS = parseInt(process.env.LIMIT_COMMENTS, 5) || 5;
 
@@ -606,21 +605,42 @@ exports.deleteComment = async (req, res, next) => {
 exports.reportComment = async (req, res, next) => {
   try {
     const { comment } = req.params;
-    const { type } = req.body;
+    const { type, blocked } = req.body;
     const author = req.user.author;
+    const cid = req.cid;
 
     if (!mongoose.Types.ObjectId.isValid(comment)) {
       return res.status(400).json({ message: 'Invalid comment ID.' });
     }
 
     const commentDoc = await Comment.findById(comment);
+
     if (!commentDoc) {
       return res.status(404).json({ message: 'Comment not found.' });
     }
 
-    const reporterProfile = await Profile.findOne({ author });
-    if (!reporterProfile) {
-      return res.status(404).json({ message: 'Reporter profile not found.' });
+    const [reporterProfile, authorProfile] = await Promise.all([
+      await profileService.getProfile(author, cid),
+      await profileService.getProfile(commentDoc.author, cid)
+    ]);
+
+    if (!reporterProfile || !authorProfile) {
+      return res.status(404).json({ message: 'Profile not found.' });
+    }
+
+    if (blocked) {
+      const alreadyBlocked = await ProfileBlock.exists({
+        blocker_id: reporterProfile._id,
+        blocked_id: authorProfile._id 
+      });
+
+      if (!alreadyBlocked) {
+        await new ProfileBlock({
+          blocker_id: reporterProfile._id,
+          blocked_id: authorProfile._id,
+          blocked_author: authorProfile.author,
+        }).save();
+      }
     }
 
     let reportedComment = await ReportedComment.findOne({ comment_id: comment });
@@ -640,18 +660,15 @@ exports.reportComment = async (req, res, next) => {
       return res.status(400).json({ message: 'You have already reported this comment.' });
     }
 
-    reportedComment.reports.push({
-      profile_id: reporterProfile._id,
-      report_type: type || 'other',
-      created_at: new Date()
-    });
-
+    reportedComment.reports.push({ profile_id: reporterProfile._id, report_type: type || 'other', created_at: new Date() });
     await reportedComment.save();
+    await profileService.deleteProfileCache(cid, author);
 
-    res.status(200).json({ message: 'Comment reported successfully.' });
+    res.status(200).json({  message: 'Comment reported successfully.', blocked: blocked || false });
+    
     next();
   } catch (error) {
-    console.error("❌ Error reporting comment:", error);
+    console.error("❌ Error in reportComment:", error);
     next(error);
   }
 };
