@@ -1220,7 +1220,6 @@ const getMoreShares = async (author, cid, query = null) => {
   return { status: 'ok', result: shares };
 };
 
-
 /**
  * Search for new potential followers excluding profiles the user already follows
  * @param {string} author - Profile author ID

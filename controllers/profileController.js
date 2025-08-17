@@ -239,13 +239,13 @@ exports.followUser = async (req, res, next) => {
 };
 
 exports.unfollowUser = async (req, res, next) => {
-  const targetId  = req.params.userId;
+  const targetAuthor  = req.params.userId;
   const author = req.user.author;
   const cid = req.cid;
 
   try {
     const currentProfile =  await profileService.getProfile(author, cid, { forceRefresh: true });
-    const profileToUnfollow = await profileService.getProfile(targetId, cid, { forceRefresh: true });
+    const profileToUnfollow = await profileService.getProfile(targetAuthor, cid, { forceRefresh: true });
 
     if (!profileToUnfollow) { return res.status(404).json({ status: 'ok', message: 'The user to unfollow does not exist.' }); }
 

@@ -31,6 +31,15 @@ const LIMIT_COMMENTS = parseInt(process.env.LIMIT_COMMENTS, 5) || 5;
 
 const DEFAULT_LANGUAGE = process.env.DEFAULT_LANGUAGE || 'es';
 
+const restrictUserConnection = async (blocker_id, blocked_id) => {
+    const isFollowing = await ProfileFollowing.findOne({  profile_id: blocker_id, following_id: blocked_id });
+    if (!isFollowing) return;
+    await isFollowing.deleteOne();
+
+    const isFollower = await ProfileFollower.findOne({ profile_id: blocked_id, follower_id: blocker_id });
+    if(isFollower) { await isFollower.deleteOne(); }
+};
+
 const cleanAndValidateText = (text) => {
   if (!text) {
     return null;
@@ -628,21 +637,6 @@ exports.reportComment = async (req, res, next) => {
       return res.status(404).json({ message: 'Profile not found.' });
     }
 
-    if (blocked) {
-      const alreadyBlocked = await ProfileBlock.exists({
-        blocker_id: reporterProfile._id,
-        blocked_id: authorProfile._id 
-      });
-
-      if (!alreadyBlocked) {
-        await new ProfileBlock({
-          blocker_id: reporterProfile._id,
-          blocked_id: authorProfile._id,
-          blocked_author: authorProfile.author,
-        }).save();
-      }
-    }
-
     let reportedComment = await ReportedComment.findOne({ comment_id: comment });
     if (!reportedComment) {
       reportedComment = new ReportedComment({
@@ -664,7 +658,32 @@ exports.reportComment = async (req, res, next) => {
     await reportedComment.save();
     await profileService.deleteProfileCache(cid, author);
 
-    res.status(200).json({  message: 'Comment reported successfully.', blocked: blocked || false });
+    if (blocked) {
+      const alreadyBlocked = await ProfileBlock.exists({
+        blocker_id: reporterProfile._id,
+        blocked_id: authorProfile._id 
+      });
+
+      if (!alreadyBlocked) {
+        await new ProfileBlock({
+          blocker_id: reporterProfile._id,
+          blocked_id: authorProfile._id,
+          blocked_author: authorProfile.author,
+        }).save();
+
+        // Blocks connection between reporter and author profiles
+        await restrictUserConnection(reporterProfile._id, authorProfile._id );
+
+            
+        await profileService.deleteProfileCache(cid, reporterProfile.author);
+        await profileService.deleteProfileCache(cid, authorProfile.author);
+      }
+    }
+
+    //Single source of truth
+    const updatedProfile =  await profileService.getSingleSourceOfTruthProfile(author, cid);
+
+    res.status(200).json({  message: 'Comment reported successfully.', blocked: blocked || false, profile: updatedProfile });
     
     next();
   } catch (error) {
