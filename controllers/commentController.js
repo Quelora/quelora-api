@@ -9,6 +9,7 @@ const ProfileComment = require('../models/ProfileComment');
 const ProfileFollower = require('../models/ProfileFollower');
 const ProfileFollowRequest = require('../models/ProfileFollowRequest');
 const ProfileFollowing = require('../models/ProfileFollowing');
+const ProfileBlock = require('../models/ProfileBlock');
 const Comment = require('../models/Comment');
 const ReportedComment = require('../models/ReportedComment');
 const CommentAudio = require('../models/CommentAudio');
@@ -619,8 +620,8 @@ exports.reportComment = async (req, res, next) => {
     }
 
     const [reporterProfile, authorProfile] = await Promise.all([
-      await profileService.getProfile(author, cid),
-      await profileService.getProfile(commentDoc.author, cid)
+      profileService.getProfile(author, cid),
+      profileService.getProfile(commentDoc.author, cid)
     ]);
 
     if (!reporterProfile || !authorProfile) {
@@ -640,25 +641,21 @@ exports.reportComment = async (req, res, next) => {
       report => report.profile_id.toString() === reporterProfile._id.toString()
     );
 
-    if (existingReport) {
-      return res.status(400).json({ message: 'You have already reported this comment.' });
+    if (!existingReport) {
+      reportedComment.reports.push({ profile_id: reporterProfile._id, report_type: type || 'other', created_at: new Date() });
+      await reportedComment.save();
     }
 
-    reportedComment.reports.push({ profile_id: reporterProfile._id, report_type: type || 'other', created_at: new Date() });
-    await reportedComment.save();
     await profileService.deleteProfileCache(cid, author);
 
+    let blockResult = true;
     if (blocked) {
-      const blockResult = await profileService.blockMember(reporterProfile, authorProfile, cid);
-      if (!blockResult) {
-        return res.status(400).json({ message: 'User already blocked.' });
-      }
+      blockResult = await profileService.blockMember(reporterProfile, authorProfile, cid);
     }
 
-    //Single source of truth
-    const updatedProfile =  await profileService.getSingleSourceOfTruthProfile(author, cid);
+    const updatedProfile = await profileService.getSingleSourceOfTruthProfile(author, cid);
 
-    res.status(200).json({  message: 'Comment reported successfully.', blocked: blocked || false, profile: updatedProfile });
+    res.status(200).json({ message: 'Comment reported successfully.', blocked: blocked && blockResult || false, profile: updatedProfile });
     
     next();
   } catch (error) {
