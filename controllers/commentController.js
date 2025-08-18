@@ -9,7 +9,6 @@ const ProfileComment = require('../models/ProfileComment');
 const ProfileFollower = require('../models/ProfileFollower');
 const ProfileFollowRequest = require('../models/ProfileFollowRequest');
 const ProfileFollowing = require('../models/ProfileFollowing');
-const ProfileBlock = require('../models/ProfileBlock');
 const Comment = require('../models/Comment');
 const ReportedComment = require('../models/ReportedComment');
 const CommentAudio = require('../models/CommentAudio');
@@ -30,15 +29,6 @@ const profileService = require('../services/profileService');
 const LIMIT_COMMENTS = parseInt(process.env.LIMIT_COMMENTS, 5) || 5;
 
 const DEFAULT_LANGUAGE = process.env.DEFAULT_LANGUAGE || 'es';
-
-const restrictUserConnection = async (blocker_id, blocked_id) => {
-    const isFollowing = await ProfileFollowing.findOne({  profile_id: blocker_id, following_id: blocked_id });
-    if (!isFollowing) return;
-    await isFollowing.deleteOne();
-
-    const isFollower = await ProfileFollower.findOne({ profile_id: blocked_id, follower_id: blocker_id });
-    if(isFollower) { await isFollower.deleteOne(); }
-};
 
 const cleanAndValidateText = (text) => {
   if (!text) {
@@ -659,24 +649,9 @@ exports.reportComment = async (req, res, next) => {
     await profileService.deleteProfileCache(cid, author);
 
     if (blocked) {
-      const alreadyBlocked = await ProfileBlock.exists({
-        blocker_id: reporterProfile._id,
-        blocked_id: authorProfile._id 
-      });
-
-      if (!alreadyBlocked) {
-        await new ProfileBlock({
-          blocker_id: reporterProfile._id,
-          blocked_id: authorProfile._id,
-          blocked_author: authorProfile.author,
-        }).save();
-
-        // Blocks connection between reporter and author profiles
-        await restrictUserConnection(reporterProfile._id, authorProfile._id );
-
-            
-        await profileService.deleteProfileCache(cid, reporterProfile.author);
-        await profileService.deleteProfileCache(cid, authorProfile.author);
+      const blockResult = await profileService.blockMember(reporterProfile, authorProfile, cid);
+      if (!blockResult) {
+        return res.status(400).json({ message: 'User already blocked.' });
       }
     }
 

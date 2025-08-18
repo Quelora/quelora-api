@@ -1353,6 +1353,117 @@ const searchNewFollowers = async (author, cid, query = null) => {
   }
 };
 
+/**
+ * Blocks a user profile
+ * @param {Object} blockerProfile - Profile object of the blocker
+ * @param {Object} blockedProfile - Profile object of the blocked user
+ * @param {string} cid - Client ID
+ * @returns {Promise<boolean>} True if blocked successfully, false if already blocked
+ */
+const blockMember = async (blockerProfile, blockedProfile, cid) => {
+  try {
+    const alreadyBlocked = await ProfileBlock.exists({
+      blocker_id: blockerProfile._id,
+      blocked_id: blockedProfile._id 
+    });
+
+    if (alreadyBlocked) {
+      return false;
+    }
+
+    await new ProfileBlock({
+      blocker_id: blockerProfile._id,
+      blocked_id: blockedProfile._id,
+      blocked_author: blockedProfile.author,
+    }).save();
+
+    // Restrict connection between profiles
+    const isFollowing = await ProfileFollowing.findOne({ profile_id: blockerProfile._id, following_id: blockedProfile._id });
+    if (isFollowing) await isFollowing.deleteOne();
+
+    const isFollower = await ProfileFollower.findOne({ profile_id: blockedProfile._id, follower_id: blockerProfile._id });
+    if (isFollower) await isFollower.deleteOne();
+
+    await Promise.all([
+      deleteProfileCache(cid, blockerProfile.author),
+      deleteProfileCache(cid, blockedProfile.author)
+    ]);
+
+    return true;
+  } catch (error) {
+    console.error('Error in blockMember:', error);
+    throw error;
+  }
+};
+
+/**
+ * Unblocks a user profile
+ * @param {Object} blockerProfile - Profile object of the blocker
+ * @param {Object} blockedProfile - Profile object of the blocked user
+ * @param {string} cid - Client ID
+ * @returns {Promise<boolean>} True if unblocked successfully, false if not blocked
+ */
+const unBlockMember = async (blockerProfile, blockedProfile, cid) => {
+  try {
+    const blockRecord = await ProfileBlock.findOne({
+      blocker_id: blockerProfile._id,
+      blocked_id: blockedProfile._id 
+    });
+
+    if (!blockRecord) {
+      return false;
+    }
+
+    await blockRecord.deleteOne();
+
+    await Promise.all([
+      deleteProfileCache(cid, blockerProfile.author),
+      deleteProfileCache(cid, blockedProfile.author)
+    ]);
+
+    return true;
+  } catch (error) {
+    console.error('Error in unBlockMember:', error);
+    throw error;
+  }
+};
+
+/**
+ * Retrieves a populated list of blocked users for a profile
+ * @param {Object} blockerProfile - Profile object of the blocker
+ * @param {string} cid - Client ID
+ * @returns {Promise<Array>} List of blocked user profiles
+ */
+const getBlockedList = async (blockerProfile, cid) => {
+  try {
+    const blockedUsers = await ProfileBlock.find({ blocker_id: blockerProfile._id })
+      .populate({
+        path: 'blocked_id',
+        select: 'author name picture given_name family_name locale settings.privacy.showActivity settings.privacy.followerApproval',
+        match: { cid }
+      })
+      .lean();
+
+    return blockedUsers
+      .filter(block => block.blocked_id)
+      .map(block => ({
+        _id: block.blocked_id._id,
+        author: block.blocked_id.author,
+        name: block.blocked_id.name,
+        picture: block.blocked_id.picture,
+        given_name: block.blocked_id.given_name,
+        family_name: block.blocked_id.family_name,
+        locale: block.blocked_id.locale,
+        visibility: block.blocked_id.settings?.privacy?.showActivity === 'onlyme' ? 'private' : 'public',
+        followerApproval: block.blocked_id.settings?.privacy?.followerApproval || false,
+        blocked_at: block.created_at
+      }));
+  } catch (error) {
+    console.error('Error in getBlockedList:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   getProfile,
   getMoreFollowing,
@@ -1363,5 +1474,8 @@ module.exports = {
   getMoreShares,
   deleteProfileCache,
   getSingleSourceOfTruthProfile,
-  searchNewFollowers  
+  searchNewFollowers,
+  blockMember, 
+  unBlockMember,
+  getBlockedList
 };

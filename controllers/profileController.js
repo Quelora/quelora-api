@@ -33,6 +33,83 @@ const validateImage = (base64String, type) => {
   }
 };
 
+exports.blockMember = async (req, res, next) => {
+  try {
+    const author = req.user.author;
+    const cid = req.cid;
+    const userId = req.params.userId;
+
+    const blockerProfile = await profileService.getProfile(author, cid);
+    const blockedProfile = await profileService.getProfile(userId, cid);
+
+    if (!blockerProfile || !blockedProfile) {
+      return res.status(404).json({ success: false, message: 'Profile not found' });
+    }
+
+    const result = await profileService.blockMember(blockerProfile, blockedProfile, cid);
+
+    if (!result) {
+      return res.status(400).json({ success: false, message: 'User already blocked' });
+    }
+
+    //Single source of truth
+    const updatedProfile =  await profileService.getSingleSourceOfTruthProfile(author, cid);
+
+    return res.status(200).json({ success: true, message: 'User blocked successfully', block: true, profile: updatedProfile, memberId: req.params.userId });
+  } catch (error) {
+    console.error('Error in blockMember:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+exports.unBlockMember = async (req, res, next) => {
+  try {
+    const author = req.user.author;
+    const cid = req.cid;
+    const userId = req.params.userId;
+
+    const blockerProfile = await profileService.getProfile(author, cid);
+    const blockedProfile = await profileService.getProfile(userId, cid);
+
+    if (!blockerProfile || !blockedProfile) {
+      return res.status(404).json({ success: false, message: 'Profile not found' });
+    }
+
+    const result = await profileService.unBlockMember(blockerProfile, blockedProfile, cid);
+
+    if (!result) {
+      return res.status(400).json({ success: false, message: 'User not blocked' });
+    }
+
+    //Single source of truth
+    const updatedProfile =  await profileService.getSingleSourceOfTruthProfile(author, cid);
+    
+    return res.status(200).json({ success: true, message: 'User unblocked successfully',  block: false, profile: updatedProfile, memberId: req.params.userId });
+  } catch (error) {
+    console.error('Error in unBlockMember:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+exports.getBlockedList = async (req, res, next) => {
+  try {
+    const author = req.user.author;
+    const cid = req.cid;
+
+    const blockerProfile = await profileService.getProfile(author, cid);
+    if (!blockerProfile) {
+      return res.status(404).json({ success: false, message: 'Profile not found' });
+    }
+
+    const blockedList = await profileService.getBlockedList(blockerProfile, cid);
+
+    return res.status(200).json({ success: true, result: blockedList });
+  } catch (error) {
+    console.error('Error in getBlockedList:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
 async function saveImageToDisk(base64String, filename) {
   const buffer = validateImage(base64String);
   if (!buffer) return null;
@@ -267,6 +344,55 @@ exports.unfollowUser = async (req, res, next) => {
     
   } catch (error) {
     console.error('Error unfollowing user:', error);
+    res.status(500).json({ status: 'error', message: 'Internal server error.' });
+  }
+};
+
+exports.cancelFollowRequest = async (req, res, next) => {
+  const targetId = req.params.userId;
+  const author = req.user.author;
+  const cid = req.cid;
+
+  try {
+    const currentProfile = await profileService.getProfile(author, cid, { forceRefresh: true });
+    if (currentProfile.author === targetId) {
+      return res.status(403).json({ status: 'ok', message: 'You cannot cancel a follow request to yourself.' });
+    }
+
+    const profileToCancel = await profileService.getProfile(targetId, cid, { forceRefresh: true });
+    if (!profileToCancel) {
+      return res.status(404).json({ status: 'ok', message: 'The user does not exist.' });
+    }
+
+    const existingRequest = await ProfileFollowRequest.findOne({
+      profile_id: currentProfile._id,
+      target_id: profileToCancel._id,
+      status: 'pending'
+    });
+
+    if (!existingRequest) {
+      return res.status(404).json({ status: 'ok', message: 'No pending follow request found.' });
+    }
+
+    await ProfileFollowRequest.deleteOne({
+      profile_id: currentProfile._id,
+      target_id: profileToCancel._id,
+      status: 'pending'
+    });
+
+    await profileService.deleteProfileCache(cid, currentProfile.author);
+    await profileService.deleteProfileCache(cid, profileToCancel.author);
+
+    const updatedProfile = await profileService.getSingleSourceOfTruthProfile(author, cid);
+
+    return res.status(200).json({
+      status: 'ok',
+      message: 'Follow request cancelled',
+      profile: updatedProfile
+    });
+
+  } catch (error) {
+    console.error('Error in cancelFollowRequest:', error);
     res.status(500).json({ status: 'error', message: 'Internal server error.' });
   }
 };

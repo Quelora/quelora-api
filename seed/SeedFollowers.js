@@ -1,5 +1,6 @@
 // SeedFollowers.js
-
+//
+//PROFILE_ID=689cb2d47c0186423bef678e NUM_FOLLOWERS=550 NUM_FOLLOWINGS=80 node SeedFollowers.js
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
 const connectDB = require('../db');
