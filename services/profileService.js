@@ -1221,6 +1221,79 @@ const getMoreShares = async (author, cid, query = null) => {
 };
 
 /**
+ * Get blocked users with full profile data
+ * @param {string} author - Profile author ID
+ * @param {string} cid - Client ID
+ * @param {string} query - Search query (optional)
+ * @returns {Promise<Object>} Blocked users data
+ */
+const getMoreBlocked = async (author, cid, query = null) => {
+  const searchQuery = validateSearchQuery(query);
+  const profile = await Profile.findOne({ author, cid }).lean();
+  if (!profile) throw new Error('Profile not found');
+
+  const cacheKey = `blocked:${cid}:${author}:${searchQuery || 'no-query'}`;
+  const cachedBlocked = await cacheClient.get(cacheKey);
+  if (cachedBlocked) return { status: 'ok', result: JSON.parse(cachedBlocked) };
+
+  const pipeline = [
+    { $match: { blocker_id: profile._id } },
+    {
+      $lookup: {
+        from: 'profiles',
+        localField: 'blocked_id',
+        foreignField: '_id',
+        as: 'blockedProfile'
+      }
+    },
+    { $unwind: '$blockedProfile' },
+    ...(searchQuery ? [{
+      $match: {
+        $or: [
+          { 'blockedProfile.name': { $regex: searchQuery, $options: 'i' } },
+          { 'blockedProfile.given_name': { $regex: searchQuery, $options: 'i' } },
+          { 'blockedProfile.family_name': { $regex: searchQuery, $options: 'i' } }
+        ]
+      }
+    }] : []),
+    { $sort: { _id: -1 } },
+    { $limit: 25 },
+    {
+      $project: {
+        _id: 1,
+        author: '$blockedProfile.author',
+        name: '$blockedProfile.name',
+        picture: '$blockedProfile.picture',
+        family_name: '$blockedProfile.family_name',
+        locale: '$blockedProfile.locale',
+        given_name: '$blockedProfile.given_name',
+        created_at: 1,
+        visibility: { 
+          $cond: { 
+            if: { $eq: ['$blockedProfile.settings.privacy.showActivity', 'onlyme'] }, 
+            then: 'private', 
+            else: 'public' 
+          } 
+        },
+        followerApproval: { $ifNull: ['$blockedProfile.settings.privacy.followerApproval', false] }
+      }
+    }
+  ];
+
+  const blocked = await ProfileBlock.aggregate(pipeline);
+
+  const response = {
+    status: 'ok',
+    result: blocked,
+    has_more: blocked.length === 25,
+    last_id: blocked.length > 0 ? blocked[blocked.length - 1]._id : null
+  };
+
+  await cacheClient.set(cacheKey, JSON.stringify(response), 'EX', 600);
+  return response;
+};
+
+/**
  * Search for new potential followers excluding profiles the user already follows
  * @param {string} author - Profile author ID
  * @param {string} cid - Client ID
@@ -1471,6 +1544,7 @@ module.exports = {
   getMoreComments,
   getMoreLikes,
   getMoreBookmarks,
+  getMoreBlocked,
   getMoreShares,
   deleteProfileCache,
   getSingleSourceOfTruthProfile,

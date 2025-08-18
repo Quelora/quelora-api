@@ -592,7 +592,7 @@ exports.unifiedSearch = async (req, res, next) => {
   const { type, query } = req.query;
   const cid = req.cid;
   const currentUser = req.user?.author;
-  const validTypes = ['comments', 'likes', 'shares', 'follower', 'followed', 'bookmarks'];
+  const validTypes = ['comments', 'likes', 'shares', 'follower', 'followed', 'bookmarks', 'blocked'];
 
   try {
     if (!type || !validTypes.includes(type)) {
@@ -620,6 +620,8 @@ exports.unifiedSearch = async (req, res, next) => {
         return res.json(await profileService.getMoreFollowing(author, cid, query, currentUser));
       case 'bookmarks': 
         return res.json(await profileService.getMoreBookmarks(author, cid, query));
+      case 'blocked':
+        return res.json(await profileService.getMoreBlocked(author, cid, query))
       default:
         return res.status(400).json({ status: 'error', message: 'Invalid search type' });
     }
