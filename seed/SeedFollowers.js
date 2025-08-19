@@ -1,6 +1,6 @@
 // SeedFollowers.js
 //
-//PROFILE_ID=689cb2d47c0186423bef678e NUM_FOLLOWERS=550 NUM_FOLLOWINGS=80 node SeedFollowers.js
+//PROFILE_ID=689ca5d2b8a03ed83ddd6ae5 NUM_FOLLOWERS=25 NUM_FOLLOWINGS=10 node SeedFollowers.js
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
 const connectDB = require('../db');
@@ -81,47 +81,79 @@ async function seedFollowers() {
     // Select random unique followers
     const shuffled = otherProfiles.sort(() => 0.5 - Math.random());
     const selectedFollowers = shuffled.slice(0, NUM_FOLLOWERS);
-    const followerDocs = selectedFollowers.map(f => ({
-      profile_id: PROFILE_ID,
-      follower_id: f._id,
-      created_at: new Date()
-    }));
+    const followerDocs = [];
+    const reciprocalFollowingDocs = [];
 
-    // Check for existing to avoid duplicates
+    // Check for existing followers to avoid duplicates
     const existingFollowers = await ProfileFollower.find({ profile_id: PROFILE_ID });
     const existingFollowerIds = new Set(existingFollowers.map(e => e.follower_id.toString()));
-    const newFollowers = followerDocs.filter(d => !existingFollowerIds.has(d.follower_id.toString()));
 
-    if (newFollowers.length > 0) {
-      await ProfileFollower.insertMany(newFollowers);
-      console.log(`✅ Added ${newFollowers.length} new followers.`);
+    for (const f of selectedFollowers) {
+      if (!existingFollowerIds.has(f._id.toString())) {
+        followerDocs.push({
+          profile_id: PROFILE_ID,
+          follower_id: f._id,
+          created_at: new Date()
+        });
+        // Create reciprocal following record for the follower
+        reciprocalFollowingDocs.push({
+          profile_id: f._id,
+          following_id: PROFILE_ID,
+          created_at: new Date()
+        });
+      }
+    }
+
+    if (followerDocs.length > 0) {
+      await ProfileFollower.insertMany(followerDocs);
+      await ProfileFollowing.insertMany(reciprocalFollowingDocs);
+      console.log(`✅ Added ${followerDocs.length} new followers and their reciprocal followings.`);
     } else {
       console.log('ℹ️ All selected followers already exist.');
     }
 
     // Select random unique followings
-    const selectedFollowings = shuffled.slice(NUM_FOLLOWERS, NUM_FOLLOWERS + NUM_FOLLOWINGS); // Avoid overlap if possible
-    const followingDocs = selectedFollowings.map(f => ({
-      profile_id: PROFILE_ID,
-      following_id: f._id,
-      created_at: new Date()
-    }));
+    const selectedFollowings = shuffled.slice(NUM_FOLLOWERS, NUM_FOLLOWERS + NUM_FOLLOWINGS); // Avoid overlap
+    const followingDocs = [];
+    const reciprocalFollowerDocs = [];
 
-    // Check for existing to avoid duplicates
+    // Check for existing followings to avoid duplicates
     const existingFollowings = await ProfileFollowing.find({ profile_id: PROFILE_ID });
     const existingFollowingIds = new Set(existingFollowings.map(e => e.following_id.toString()));
-    const newFollowings = followingDocs.filter(d => !existingFollowingIds.has(d.following_id.toString()));
 
-    if (newFollowings.length > 0) {
-      await ProfileFollowing.insertMany(newFollowings);
-      console.log(`✅ Added ${newFollowings.length} new followings.`);
+    for (const f of selectedFollowings) {
+      if (!existingFollowingIds.has(f._id.toString())) {
+        followingDocs.push({
+          profile_id: PROFILE_ID,
+          following_id: f._id,
+          created_at: new Date()
+        });
+        // Create reciprocal follower record for the followed profile
+        reciprocalFollowerDocs.push({
+          profile_id: f._id,
+          follower_id: PROFILE_ID,
+          created_at: new Date()
+        });
+      }
+    }
+
+    if (followingDocs.length > 0) {
+      await ProfileFollowing.insertMany(followingDocs);
+      await ProfileFollower.insertMany(reciprocalFollowerDocs);
+      console.log(`✅ Added ${followingDocs.length} new followings and their reciprocal followers.`);
     } else {
       console.log('ℹ️ All selected followings already exist.');
     }
 
-    // Update profile counters
+    // Update profile counters for main profile and all affected FakeUser profiles
     console.log('⏳ Updating profile counters...');
     await updateProfileCounters(PROFILE_ID);
+    for (const f of selectedFollowers) {
+      await updateProfileCounters(f._id);
+    }
+    for (const f of selectedFollowings) {
+      await updateProfileCounters(f._id);
+    }
     console.log('✅ Profile counters updated.');
 
   } catch (err) {

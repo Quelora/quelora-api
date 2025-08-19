@@ -1,5 +1,5 @@
 // SeedProfiles.js
-// CID="QU-ME7MZ3WI-3CUPR" TOTAL_PROFILES=10000 node seedFakerUser.js
+// CID="QU-ME7HF2BN-E8QD9" TOTAL_PROFILES=100 node seedFakerUser.js
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
 const { ObjectId } = mongoose.Types;
@@ -102,12 +102,12 @@ const createFakeProfile = (index, timestamp) => {
     picture: `https://i.pravatar.cc/150?img=${(index % 70) + 1}`,
     background: null,
     locale: 'es',
-    bookmarksCount: Math.floor(Math.random() * 10),
-    commentsCount: Math.floor(Math.random() * 10),
-    followersCount: Math.floor(Math.random() * 50),
-    followingCount: Math.floor(Math.random() * 50),
-    likesCount: Math.floor(Math.random() * 100),
-    sharesCount: Math.floor(Math.random() * 20),
+    bookmarksCount: 0,
+    commentsCount:0,
+    followersCount: 0,
+    followingCount: 0,
+    likesCount: 0,
+    sharesCount: 0,
     location: {
       city: city.name,
       country: city.name === 'Palma' ? 'Spain' : 

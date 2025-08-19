@@ -7,6 +7,7 @@ const ProfileBookmark = require('../models/ProfileBookmark');
 const ProfileFollowing = require('../models/ProfileFollowing');
 const ProfileFollower = require('../models/ProfileFollower');
 const ProfileFollowRequest = require('../models/ProfileFollowRequest');
+const CommentAnalysis = require('../models/CommentAnalysis');
 
 const Comment = require('../models/Comment');
 const { cacheService } = require('../services/cacheService');
@@ -14,7 +15,9 @@ const { recordGeoActivity, recordActivityHit } = require('../utils/recordStatsAc
 const { enrichLikesWithFollowStatus } = require('../utils/followStatusUtils');
 const activityService = require('../services/activityService');
 const profileService = require('../services/profileService');
+const { translateService } = require('../services/translateService');
 
+const { commentAnalysisService } = require('../services/commentAnalysisService');
 const formatComment = require('../utils/formatComment');
 const LIMIT_COMMENTS = parseInt(process.env.LIMIT_COMMENTS, 15) || 15;
 
@@ -45,16 +48,24 @@ const getSessionUserId = async (author, cid) => {
   return sessionUserId;
 };
 
-const incrementPostViews = async (cid, entities) => {
-  for (const entity of entities) {
-    const viewCacheKey = `cid:${cid}:postViews:${entity}`;
-    const currentViews = await cacheService.get(viewCacheKey);
-    if (currentViews !== null) {
-      await cacheService.set(viewCacheKey, parseInt(currentViews) + 1, 3600);
-    } else {
-      await cacheService.set(viewCacheKey, 1, 3600);
+/**
+* Gets the user's preferred language from their profile.
+* Returns 'en' (English) as the default language if it can't be determined.
+* @param {string|null} author - The author ID.
+* @param {string} cid - The client/community ID.
+* @returns {Promise<string>} The language code (e.g., 'es', 'en').
+*/
+const getUserLanguage = async (author, cid) => {
+    if (!author) return 'en';
+    try {
+        const userProfile = await profileService.getProfile(author, cid);
+        if (userProfile && userProfile.locale) {
+            return userProfile.locale.split('-')[0];
+        }
+    } catch (error) {
+        console.error(`Error al obtener el perfil para el autor ${author}:`, error);
     }
-  }
+    return 'en';
 };
 
 const getProfilesForComments = async (comments, sessionUserId = null, cid) => {
@@ -139,19 +150,30 @@ const getProfilesForComments = async (comments, sessionUserId = null, cid) => {
   return profileMap;
 };
 
+const incrementPostViews = async (cid, entities) => {
+  for (const entity of entities) {
+    const viewCacheKey = `cid:${cid}:postViews:${entity}`;
+    const currentViews = await cacheService.get(viewCacheKey);
+    if (currentViews !== null) {
+      await cacheService.set(viewCacheKey, parseInt(currentViews) + 1, 3600);
+    } else {
+      await cacheService.set(viewCacheKey, 1, 3600);
+    }
+  }
+};
+
 exports.getNestedComments = async (req, res, next) => {
   try {
     const { entity } = req.params;
     const author = req?.user?.author ?? null;
     const { commentId, replyId } = req.query;
     const cid = req.cid;
-
     if (!mongoose.Types.ObjectId.isValid(commentId) || 
         (replyId && !mongoose.Types.ObjectId.isValid(replyId))) {
       throw new Error('Invalid comment or reply ID');
     }
 
-    const cacheKey = `cid:${cid}:nestedComments:${commentId}:${author || 'anonymous'}`; 
+    const cacheKey = `cid:${cid}:nestedComments:${commentId}:${replyId}:${author || 'anonymous'}`; 
     const cachedData = await cacheService.get(cacheKey);
     
     if (cachedData) {
@@ -812,6 +834,129 @@ exports.sharePost = async (req, res, next) => {
     next();
   } catch (error) {
     console.error("❌ Error sharing post:", error);
+    next(error);
+  }
+};
+
+exports.getCommentAnalysis = async (req, res, next) => {
+  try {
+    const { entity } = req.params;
+    const cid = req.cid;
+    const author = req?.user?.author ?? null;
+    if (!mongoose.Types.ObjectId.isValid(entity)) {
+      return res.status(400).json({ message: 'Invalid entity ID.' });
+    }
+    let targetLanguage = await getUserLanguage(author, cid);
+    const cacheKey = `cid:${cid}:commentAnalysis:${entity}`;
+    const translatedCacheKey = `cid:${cid}:commentAnalysis:${entity}:${targetLanguage}`;
+    let cachedAnalysis = await cacheService.get(translatedCacheKey);
+    let isTranslatedCache = true;
+    if (!cachedAnalysis) {
+      cachedAnalysis = await cacheService.get(cacheKey);
+      isTranslatedCache = false;
+    }
+    const post = await Post.findOne({ entity, cid, 'deletion.status': 'active' }).select('title description commentCount likes');
+    if (!post) { return res.status(404).json({ message: 'Post not found.' }); }
+    let analysisResult;
+    let comments;
+    if (cachedAnalysis) {
+      analysisResult = { analysis: JSON.parse(JSON.stringify(cachedAnalysis)) };
+      if (!isTranslatedCache && targetLanguage !== 'en' && analysisResult.analysis.debateSummary) {
+        try {
+          analysisResult.analysis.originalDebateSummary = analysisResult.analysis.debateSummary;
+          analysisResult.analysis.debateSummary = await translateService(analysisResult.analysis.debateSummary, targetLanguage);
+          await cacheService.set(translatedCacheKey, analysisResult.analysis, 16000);
+        } catch (translationError) {}
+      }
+    } else {
+      let lastAnalyzedTimestamp = null;
+      const storedAnalysis = await CommentAnalysis.findOne({ entity, cid }).sort({ updatedAt: -1 }).lean();
+      if (storedAnalysis) {
+        lastAnalyzedTimestamp = storedAnalysis.lastAnalyzedCommentTimestamp;
+        analysisResult = { analysis: storedAnalysis.analysis };
+        comments = await Comment.find({
+          post: post._id,
+          parent: null,
+          visible: true,
+          created_at: { $gt: lastAnalyzedTimestamp }
+        }).select('_id text repliesCount likesCount created_at author likes').lean();
+        if (comments.length > 0) {
+          const newAnalysis = await commentAnalysisService(cid, post.title || 'Untitled', post.description || '', comments, storedAnalysis.analysis);
+          if (newAnalysis.analysis) {
+            analysisResult = newAnalysis;
+            await CommentAnalysis.findOneAndUpdate(
+              { entity, cid },
+              {
+                analysis: newAnalysis.analysis,
+                lastAnalyzedCommentTimestamp: new Date(newAnalysis.analysis.lastAnalyzedCommentTimestamp),
+                updatedAt: new Date()
+              },
+              { upsert: true }
+            );
+          }
+        }
+      } else {
+        comments = await Comment.find({ post: post._id, parent: null, visible: true })
+          .select('_id text repliesCount likesCount created_at author likes')
+          .lean();
+        if (comments.length === 0) {
+          return res.status(200).json({ analysis: null });
+        }
+        analysisResult = await commentAnalysisService(cid, post.title || 'Untitled', post.description || '', comments);
+        if (analysisResult.analysis) {
+          await CommentAnalysis.create({
+            cid,
+            entity,
+            analysis: analysisResult.analysis,
+            lastAnalyzedCommentTimestamp: new Date(analysisResult.analysis.lastAnalyzedCommentTimestamp)
+          });
+        }
+      }
+      if (analysisResult.analysis) {
+        if (targetLanguage !== 'en' && analysisResult.analysis.debateSummary) {
+          try {
+            analysisResult.analysis.originalDebateSummary = analysisResult.analysis.debateSummary;
+            analysisResult.analysis.debateSummary = await translateService(analysisResult.analysis.debateSummary, targetLanguage);
+            await cacheService.set(translatedCacheKey, analysisResult.analysis, 16000);
+          } catch (translationError) {
+            await cacheService.set(cacheKey, analysisResult.analysis, 16000);
+          }
+        } else {
+          await cacheService.set(cacheKey, analysisResult.analysis, 16000);
+        }
+      }
+    }
+    if (!analysisResult.analysis) {
+      return res.status(200).json({ analysis: null });
+    }
+    const profileMap = await getProfilesForComments(
+      analysisResult.analysis.highlightedComments.map(hc => hc.comment).filter(c => c),
+      await getSessionUserId(author, cid),
+      cid
+    );
+    const formattedHighlightedComments = await Promise.all(
+      analysisResult.analysis.highlightedComments.map(async (hc) => {
+        if (!hc.comment) return hc;
+        const fullComment = await Comment.findOne({ _id: hc._id, visible: true })
+          .select('_id text repliesCount likesCount created_at author likes')
+          .lean();
+        if (!fullComment) return hc;
+        const formattedComment = await formatComment({
+          ...fullComment,
+          replies_visibles: fullComment.repliesCount || 0
+        }, profileMap[fullComment.author], author);
+        formattedComment.authorLiked = author ? (fullComment.likes || []).includes(author) : false;
+        formattedComment.likesCount = fullComment.likesCount;
+        return {
+          ...hc,
+          comment: formattedComment
+        };
+      })
+    );
+    analysisResult.analysis.highlightedComments = formattedHighlightedComments;
+    res.status(200).json({ analysis: analysisResult.analysis });
+  } catch (error) {
+    console.error('Error in getCommentAnalysis:', error);
     next(error);
   }
 };
