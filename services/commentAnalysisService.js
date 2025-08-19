@@ -7,8 +7,7 @@ const GeminiAnalysisProvider = require('../moderationProviders/GeminiModerationP
 const DeepSeekAnalysisProvider = require('../moderationProviders/DeepSeekModerationProvider');
 
 
-
-async function commentAnalysisService(cid, title, summary, comments) {
+async function commentAnalysisService(cid, title, summary, comments, lastAnalysis = {}) {
 
     let clientConfig;
 
@@ -53,7 +52,7 @@ async function commentAnalysisService(cid, title, summary, comments) {
     }
 
     // Prepare prompt using fixed configuration
-    const prompt = generateCommentAnalysisPrompt(title, summary, comments);
+    const prompt = generateCommentAnalysisPrompt(title, summary, comments, lastAnalysis = {});
 
     try {
         const result = await provider.analyze(prompt);

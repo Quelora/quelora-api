@@ -19,7 +19,9 @@ const { translateService } = require('../services/translateService');
 
 const { commentAnalysisService } = require('../services/commentAnalysisService');
 const formatComment = require('../utils/formatComment');
+
 const LIMIT_COMMENTS = parseInt(process.env.LIMIT_COMMENTS, 15) || 15;
+const ANALYSIS_TTL_SEC = 16000;
 
 /**
 * Gets the authenticated user's profile ID
@@ -843,120 +845,160 @@ exports.getCommentAnalysis = async (req, res, next) => {
     const { entity } = req.params;
     const cid = req.cid;
     const author = req?.user?.author ?? null;
+
     if (!mongoose.Types.ObjectId.isValid(entity)) {
       return res.status(400).json({ message: 'Invalid entity ID.' });
     }
-    let targetLanguage = await getUserLanguage(author, cid);
+
+    let targetLanguage = 'en';
+    try { targetLanguage = await getUserLanguage(author, cid) || 'en'; } catch {}
+
     const cacheKey = `cid:${cid}:commentAnalysis:${entity}`;
     const translatedCacheKey = `cid:${cid}:commentAnalysis:${entity}:${targetLanguage}`;
+
+    // Intentar servir desde caché
     let cachedAnalysis = await cacheService.get(translatedCacheKey);
     let isTranslatedCache = true;
+
     if (!cachedAnalysis) {
       cachedAnalysis = await cacheService.get(cacheKey);
       isTranslatedCache = false;
     }
-    const post = await Post.findOne({ entity, cid, 'deletion.status': 'active' }).select('title description commentCount likes');
-    if (!post) { return res.status(404).json({ message: 'Post not found.' }); }
-    let analysisResult;
-    let comments;
+
     if (cachedAnalysis) {
-      analysisResult = { analysis: JSON.parse(JSON.stringify(cachedAnalysis)) };
-      if (!isTranslatedCache && targetLanguage !== 'en' && analysisResult.analysis.debateSummary) {
+      cachedAnalysis = JSON.parse(JSON.stringify(cachedAnalysis));
+
+      if (!isTranslatedCache && targetLanguage !== 'en' && cachedAnalysis.debateSummary) {
         try {
-          analysisResult.analysis.originalDebateSummary = analysisResult.analysis.debateSummary;
-          analysisResult.analysis.debateSummary = await translateService(analysisResult.analysis.debateSummary, targetLanguage);
-          await cacheService.set(translatedCacheKey, analysisResult.analysis, 16000);
-        } catch (translationError) {}
+          cachedAnalysis.originalDebateSummary = cachedAnalysis.debateSummary;
+          cachedAnalysis.debateSummary = await translateService(cachedAnalysis.debateSummary, targetLanguage);
+          await cacheService.set(translatedCacheKey, cachedAnalysis, ANALYSIS_TTL_SEC);
+        } catch {}
       }
-    } else {
-      let lastAnalyzedTimestamp = null;
-      const storedAnalysis = await CommentAnalysis.findOne({ entity, cid }).sort({ updatedAt: -1 }).lean();
-      if (storedAnalysis) {
-        lastAnalyzedTimestamp = storedAnalysis.lastAnalyzedCommentTimestamp;
-        analysisResult = { analysis: storedAnalysis.analysis };
-        comments = await Comment.find({
-          post: post._id,
-          parent: null,
-          visible: true,
-          created_at: { $gt: lastAnalyzedTimestamp }
-        }).select('_id text repliesCount likesCount created_at author likes').lean();
-        if (comments.length > 0) {
-          const newAnalysis = await commentAnalysisService(cid, post.title || 'Untitled', post.description || '', comments, storedAnalysis.analysis);
-          if (newAnalysis.analysis) {
-            analysisResult = newAnalysis;
-            await CommentAnalysis.findOneAndUpdate(
-              { entity, cid },
-              {
-                analysis: newAnalysis.analysis,
-                lastAnalyzedCommentTimestamp: new Date(newAnalysis.analysis.lastAnalyzedCommentTimestamp),
-                updatedAt: new Date()
-              },
-              { upsert: true }
-            );
+
+      if (Array.isArray(cachedAnalysis.highlightedComments) && author) {
+        const ids = cachedAnalysis.highlightedComments
+          .map(hc => hc?.comment?._id)
+          .filter(Boolean);
+
+        if (ids.length) {
+          const rows = await Comment.find({ _id: { $in: ids } })
+            .select('_id likes likesCount')
+            .lean();
+          const cmap = new Map(rows.map(r => [String(r._id), r]));
+          for (const hc of cachedAnalysis.highlightedComments) {
+            if (hc.comment && hc.comment._id) {
+              const row = cmap.get(String(hc.comment._id));
+              if (row) {
+                const likesArr = row.likes || [];
+                hc.comment.authorLiked = likesArr.some(x =>
+                  typeof x?.equals === 'function' ? x.equals(author) : String(x) === String(author)
+                );
+                hc.comment.likesCount = row.likesCount ?? 0;
+              } else {
+                hc.comment.authorLiked = false;
+                hc.comment.likesCount = hc.comment.likesCount ?? 0;
+              }
+            }
           }
         }
-      } else {
-        comments = await Comment.find({ post: post._id, parent: null, visible: true })
-          .select('_id text repliesCount likesCount created_at author likes')
-          .lean();
-        if (comments.length === 0) {
-          return res.status(200).json({ analysis: null });
-        }
-        analysisResult = await commentAnalysisService(cid, post.title || 'Untitled', post.description || '', comments);
-        if (analysisResult.analysis) {
-          await CommentAnalysis.create({
-            cid,
-            entity,
-            analysis: analysisResult.analysis,
-            lastAnalyzedCommentTimestamp: new Date(analysisResult.analysis.lastAnalyzedCommentTimestamp)
-          });
-        }
       }
-      if (analysisResult.analysis) {
-        if (targetLanguage !== 'en' && analysisResult.analysis.debateSummary) {
-          try {
-            analysisResult.analysis.originalDebateSummary = analysisResult.analysis.debateSummary;
-            analysisResult.analysis.debateSummary = await translateService(analysisResult.analysis.debateSummary, targetLanguage);
-            await cacheService.set(translatedCacheKey, analysisResult.analysis, 16000);
-          } catch (translationError) {
-            await cacheService.set(cacheKey, analysisResult.analysis, 16000);
-          }
-        } else {
-          await cacheService.set(cacheKey, analysisResult.analysis, 16000);
-        }
-      }
+
+      return res.status(200).json({ analysis: cachedAnalysis });
     }
-    if (!analysisResult.analysis) {
-      return res.status(200).json({ analysis: null });
+
+    const previousAnalysisDoc = await CommentAnalysis.findOne({ cid, entity }).lean();
+
+    const post = await Post.findOne({ entity, cid, 'deletion.status': 'active' })
+      .select('title description commentCount')
+      .lean();
+    if (!post) return res.status(404).json({ message: 'Post not found.' });
+
+    const commentQuery = { post: post._id, parent: null, visible: true };
+    if (previousAnalysisDoc?.lastAnalyzedCommentTimestamp) {
+      commentQuery.created_at = { $gt: previousAnalysisDoc.lastAnalyzedCommentTimestamp };
     }
+
+    const newComments = await Comment.find(commentQuery)
+      .select('_id text repliesCount likesCount created_at author')
+      .lean();
+
+    const previousAnalysis = previousAnalysisDoc ? previousAnalysisDoc.analysis : null;
+    const analysisResult = await commentAnalysisService(
+      cid,
+      post.title || 'Untitled',
+      post.description || '',
+      newComments,
+      previousAnalysis
+    );
+
+    const allHighlightedComments = Array.isArray(analysisResult.analysis.highlightedComments)
+      ? analysisResult.analysis.highlightedComments
+      : [];
+
     const profileMap = await getProfilesForComments(
-      analysisResult.analysis.highlightedComments.map(hc => hc.comment).filter(c => c),
+      newComments,
       await getSessionUserId(author, cid),
       cid
     );
+
     const formattedHighlightedComments = await Promise.all(
-      analysisResult.analysis.highlightedComments.map(async (hc) => {
-        if (!hc.comment) return hc;
+      allHighlightedComments.map(async hc => {
         const fullComment = await Comment.findOne({ _id: hc._id, visible: true })
-          .select('_id text repliesCount likesCount created_at author likes')
+          .select('_id text repliesCount likesCount created_at author')
           .lean();
         if (!fullComment) return hc;
-        const formattedComment = await formatComment({
-          ...fullComment,
-          replies_visibles: fullComment.repliesCount || 0
-        }, profileMap[fullComment.author], author);
-        formattedComment.authorLiked = author ? (fullComment.likes || []).includes(author) : false;
+
+        const formattedComment = await formatComment(
+          { ...fullComment, replies_visibles: fullComment.repliesCount || 0 },
+          profileMap[fullComment.author],
+          author
+        );
+
+        formattedComment.authorLiked = author
+          ? (fullComment.likes || []).some(x =>
+              typeof x?.equals === 'function' ? x.equals(author) : String(x) === String(author)
+            )
+          : false;
         formattedComment.likesCount = fullComment.likesCount;
+
         return {
           ...hc,
           comment: formattedComment
         };
       })
     );
+
     analysisResult.analysis.highlightedComments = formattedHighlightedComments;
-    res.status(200).json({ analysis: analysisResult.analysis });
+
+    // Traducir debateSummary incluso la primera vez
+    let analysisToCache = JSON.parse(JSON.stringify(analysisResult.analysis));
+    if (targetLanguage !== 'en' && analysisToCache.debateSummary) {
+      try {
+        analysisToCache.originalDebateSummary = analysisToCache.debateSummary;
+        analysisToCache.debateSummary = await translateService(analysisToCache.debateSummary, targetLanguage);
+      } catch {}
+    }
+
+    await cacheService.set(cacheKey, analysisToCache, ANALYSIS_TTL_SEC);
+    if (targetLanguage !== 'en') {
+      await cacheService.set(translatedCacheKey, analysisToCache, ANALYSIS_TTL_SEC);
+    }
+
+    // Guardar o actualizar CommentAnalysis
+    await CommentAnalysis.findOneAndUpdate(
+      { cid, entity },
+      {
+        cid,
+        entity,
+        analysis: analysisToCache,
+        lastAnalyzedCommentTimestamp: new Date()
+      },
+      { upsert: true }
+    );
+
+    res.status(200).json({ analysis: analysisToCache });
   } catch (error) {
-    console.error('Error in getCommentAnalysis:', error);
     next(error);
   }
 };

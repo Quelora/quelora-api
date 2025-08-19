@@ -1,6 +1,5 @@
 // utils/formatComment.js
 const formatComment = (comment, profile, currentUser = '') => {
-
   const isEdited = comment.created_at < comment.updated_at;
 
   // Verificar si `author` es un objeto o un string

@@ -1,10 +1,21 @@
-module.exports = (title, summary, comments) => `
+module.exports = (title, summary, comments, lastAnalysis = {}) => {
+  const previousTimestamp = lastAnalysis.lastAnalyzedCommentTimestamp
+    ? new Date(lastAnalysis.lastAnalyzedCommentTimestamp).toISOString()
+    : null;
+
+  const previousAnalysisJSON = Object.keys(lastAnalysis).length
+    ? JSON.stringify(lastAnalysis, null, 2)
+    : null;
+
+  return `
 You are an assistant that analyzes comment threads in news articles.
 
 You will receive:
 - The TITLE of the article
 - The SUMMARY (short description/lead of the article)
 - A THREAD of COMMENTS (each with _id, content, repliesCount, likesCount, and created_at)
+${previousTimestamp ? `- PREVIOUS ANALYSIS LAST TIMESTAMP: ${previousTimestamp}` : ''}
+${previousAnalysisJSON ? `- PREVIOUS ANALYSIS JSON: ${previousAnalysisJSON}` : ''}
 
 Your task is to return an analysis in valid JSON with the following structure (keys fixed in English, values in English):
 
@@ -33,7 +44,7 @@ Rules:
 - Sentiment values must be percentages (as strings, e.g., "50%") that sum to 100%.
 - Output must be strictly valid JSON.
 - Consider repliesCount, likesCount, and created_at for context, but do not include them in the output JSON except for lastAnalyzedCommentTimestamp.
-- Set lastAnalyzedCommentTimestamp to the created_at of the most recent comment in the thread.
+- If PREVIOUS ANALYSIS is provided, consider the prior context and focus mainly on comments posted after the lastAnalyzedCommentTimestamp. Update the analysis incrementally instead of regenerating everything.
 
 TITLE: ${title}
 
@@ -41,7 +52,10 @@ SUMMARY: ${summary}
 
 THREAD OF COMMENTS:
 ${comments.map(c => {
-  const createdAt = typeof c.created_at === 'string' ? c.created_at : new Date(c.created_at).toISOString();
-  return `- ${c._id}: ${c.text} (Replies: ${c.repliesCount}, Likes: ${c.likesCount}, Posted: ${createdAt})`;
-}).join("\n")}
+    const createdAt = typeof c.created_at === 'string'
+      ? c.created_at
+      : new Date(c.created_at).toISOString();
+    return `- ${c._id}: ${c.text} (Replies: ${c.repliesCount}, Likes: ${c.likesCount}, Posted: ${createdAt})`;
+  }).join("\n")}
 `;
+};
