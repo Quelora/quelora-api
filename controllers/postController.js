@@ -747,7 +747,7 @@ exports.getCommentAnalysis = async (req, res, next) => {
     // Fetch post and validate
     const post = await Post.findOne({ 
       entity, 
-      cid, 
+      cid,
       'deletion.status': 'active' 
     }).select('title description commentCount').lean();
     
@@ -770,6 +770,7 @@ exports.getCommentAnalysis = async (req, res, next) => {
       newComments,
       previousAnalysisDoc?.analysis
     );
+
 
     // Ensure analysisResult.analysis exists
     const analysis = analysisResult.analysis ?? {};

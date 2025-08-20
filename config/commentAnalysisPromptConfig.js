@@ -35,10 +35,11 @@ Rules:
 - Always respond in **English** for all values.
 - Replace descriptions with real content, preserving JSON keys exactly as given.
 - "highlightedComments" must contain the **complete structure** of each highlighted comment as it appeared in the THREAD (including _id, comment, repliesCount, likesCount, created_at), plus "reasonHighlighted".
-- If no comments are worth highlighting, return "highlightedComments": [].
-- The PREVIOUS ANALYSIS JSON is the historical record of all prior comments. Your primary focus is on the NEW COMMENTS provided in this thread.
-- You MUST reuse the "highlightedComments" array from the PREVIOUS ANALYSIS JSON **if there are no new comments** in the provided THREAD. Do not add clarifications like "no new comments", just output the previous analysis.
-- If there ARE new comments, you MUST analyze them. Compare the new comments (based on recency, likes, replies, and insight) against the previously highlighted ones. Your output should contain the most relevant comments overall, which may be a mix of old and new, or only new ones if they are superior.
+- You must return **up to 3 highlighted comments maximum**:
+  1. If no new comments are provided but the PREVIOUS ANALYSIS JSON contains highlighted comments, reuse them (up to 3).
+  2. If new comments are provided, evaluate them along with the previously highlighted ones. Keep up to 3 of the most relevant overall (new, old, or a mix).
+  3. If there are no new comments AND no previous highlighted comments, return an empty array [].
+- Never return more than 3 highlighted comments under any circumstance.
 - The "debateSummary" must be updated to reflect the entire discussion (historical + new), not just the new comments.
 - Sentiment values must be percentages (as strings, e.g., "50%") that sum to 100%. Recalculate this based on the total known corpus of comments if possible, or state an assumption if metadata is missing.
 - Output must be strictly valid JSON.

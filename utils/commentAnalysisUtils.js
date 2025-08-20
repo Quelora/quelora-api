@@ -8,7 +8,6 @@ const { getProfilesForComments, getSessionUserId } = require('./profileUtils');
 
 const ANALYSIS_TTL_SEC = 300;
 
-
 /**
  * Retrieves cached analysis data
  * @param {Object} cacheKeys - Base and translated cache keys
