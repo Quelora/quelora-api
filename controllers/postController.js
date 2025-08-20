@@ -924,6 +924,7 @@ exports.getCommentAnalysis = async (req, res, next) => {
       .lean();
 
     const previousAnalysis = previousAnalysisDoc ? previousAnalysisDoc.analysis : null;
+
     const analysisResult = await commentAnalysisService(
       cid,
       post.title || 'Untitled',
@@ -944,6 +945,9 @@ exports.getCommentAnalysis = async (req, res, next) => {
 
     const formattedHighlightedComments = await Promise.all(
       allHighlightedComments.map(async hc => {
+        if (!mongoose.Types.ObjectId.isValid(hc._id)) {
+          return hc;
+        }
         const fullComment = await Comment.findOne({ _id: hc._id, visible: true })
           .select('_id text repliesCount likesCount created_at author')
           .lean();
