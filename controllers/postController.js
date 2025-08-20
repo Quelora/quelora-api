@@ -22,7 +22,6 @@ const { getSessionUserId, getUserLanguage, getProfilesForComments } = require('.
 const { getCachedAnalysis, updateAuthorLikes, buildCommentQuery, processHighlightedComments, handleTranslation, updateCommentAnalysis, cacheAnalysis } = require('../utils/commentAnalysisUtils');
 
 const LIMIT_COMMENTS = parseInt(process.env.LIMIT_COMMENTS, 15) || 15;
-const ANALYSIS_TTL_SEC = 16000;
 
 const incrementPostViews = async (cid, entities) => {
   for (const entity of entities) {

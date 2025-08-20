@@ -6,6 +6,9 @@ const CommentAnalysis = require('../models/CommentAnalysis');
 const formatComment = require('../utils/formatComment');
 const { getProfilesForComments, getSessionUserId } = require('./profileUtils');
 
+const ANALYSIS_TTL_SEC = 300;
+
+
 /**
  * Retrieves cached analysis data
  * @param {Object} cacheKeys - Base and translated cache keys
@@ -26,7 +29,7 @@ async function getCachedAnalysis(cacheKeys, targetLanguage) {
       cachedAnalysis = JSON.parse(JSON.stringify(cachedAnalysis));
       cachedAnalysis.originalDebateSummary = cachedAnalysis.debateSummary;
       cachedAnalysis.debateSummary = await translateService(cachedAnalysis.debateSummary, targetLanguage);
-      await cacheService.set(cacheKeys.translated, cachedAnalysis, 16000);
+      await cacheService.set(cacheKeys.translated, cachedAnalysis, ANALYSIS_TTL_SEC);
     } catch (error) {
       console.error('Translation error:', error);
     }
@@ -214,9 +217,9 @@ async function updateCommentAnalysis(cid, entity, analysis) {
  * @returns {Promise<void>}
  */
 async function cacheAnalysis(cacheKeys, analysis, targetLanguage) {
-  await cacheService.set(cacheKeys.base, analysis, 16000);
+  await cacheService.set(cacheKeys.base, analysis, ANALYSIS_TTL_SEC);
   if (targetLanguage !== 'en') {
-    await cacheService.set(cacheKeys.translated, analysis, 16000);
+    await cacheService.set(cacheKeys.translated, analysis, ANALYSIS_TTL_SEC);
   }
 }
 
