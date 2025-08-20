@@ -9,9 +9,9 @@ class OpenAIModerationProvider extends ModerationProvider {
         this.defaultConfig = {
             model: this.configJson.model || 'gpt-3.5-turbo',
             temperature: parseFloat(this.configJson.temperature || 0.7),
-            max_tokens: parseInt(this.configJson.max_tokens || 1000, 10),
+            max_tokens: parseInt(this.configJson.max_tokens || 5000, 10),
             max_retries: parseInt(this.configJson.max_retries || 3, 10),
-            timeout: parseInt(this.configJson.timeout || 30000, 10)
+            timeout: parseInt(this.configJson.timeout || 60000, 10)
         };
 
         // Validar que el apiKey esté presente

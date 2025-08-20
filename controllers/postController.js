@@ -932,7 +932,7 @@ exports.getCommentAnalysis = async (req, res, next) => {
       newComments,
       previousAnalysis
     );
-
+    
     const allHighlightedComments = Array.isArray(analysisResult.analysis.highlightedComments)
       ? analysisResult.analysis.highlightedComments
       : [];

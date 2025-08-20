@@ -45,6 +45,7 @@ Rules:
 - Replace descriptions with real content, preserving JSON keys exactly as given.
 - "highlightedComments" must contain the **complete structure** of each highlighted comment as it appeared in the THREAD (including _id, comment, repliesCount, likesCount, created_at), plus "reasonHighlighted".
 - If no comments are worth highlighting, return "highlightedComments": [].
+- If there are no new comments since the last analysis, or if the previously highlighted comments are more relevant, you may reuse the "highlightedComments" from the PREVIOUS ANALYSIS JSON.
 - Select 1 to 3 highlighted comments that add value (e.g., well-argued, evidence-based, or novel ideas). Use repliesCount, likesCount, and recency to help choose.
 - Sentiment values must be percentages (as strings, e.g., "50%") that sum to 100%.
 - Output must be strictly valid JSON.
