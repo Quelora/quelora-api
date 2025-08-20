@@ -51,8 +51,8 @@ async function commentAnalysisService(cid, title, summary, comments, lastAnalysi
             return { analysis: null, reason: `Provider not supported: ${clientConfig.provider}` };
     }
 
-    // Prepare prompt using fixed configuration
-    const prompt = generateCommentAnalysisPrompt(title, summary, comments, lastAnalysis = {});
+
+    const prompt = generateCommentAnalysisPrompt(title, summary, comments, lastAnalysis);
 
     try {
         const result = await provider.analyze(prompt);

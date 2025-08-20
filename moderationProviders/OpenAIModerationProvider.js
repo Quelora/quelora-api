@@ -9,7 +9,7 @@ class OpenAIModerationProvider extends ModerationProvider {
         this.defaultConfig = {
             model: this.configJson.model || 'gpt-3.5-turbo',
             temperature: parseFloat(this.configJson.temperature || 0.7),
-            max_tokens: parseInt(this.configJson.max_tokens || 5000, 10),
+            max_tokens: parseInt(this.configJson.max_tokens || 4096, 10),
             max_retries: parseInt(this.configJson.max_retries || 3, 10),
             timeout: parseInt(this.configJson.timeout || 60000, 10)
         };
@@ -27,7 +27,7 @@ class OpenAIModerationProvider extends ModerationProvider {
         });
     }
 
-    async moderate(prompt) {
+    async moderate(prompt) {  
         const chatBotParams = {
             messages: [{ role: 'user', content: prompt }],
             model: this.defaultConfig.model,
