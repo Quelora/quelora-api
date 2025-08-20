@@ -3,15 +3,18 @@
 class ModerationProvider {
     constructor(apiKey, configJson) {
         this.apiKey = apiKey;
-        this.configJson = typeof configJson === 'string' ? JSON.parse(configJson) : configJson || {};
+        try {
+            this.configJson = typeof configJson === 'string' && configJson.trim() ? JSON.parse(configJson) : configJson || {};
+        } catch (error) {
+            console.error('Error parsing configJson:', error.message);
+            this.configJson = {};
+        }
     }
 
-    // Método que deben implementar todos los proveedores
     async moderate(prompt) {
         throw new Error('The moderate method must be implemented by the provider.');
     }
 
-    // moderate alias
     async analyze(prompt) {
         return await this.moderate(prompt);
     }
