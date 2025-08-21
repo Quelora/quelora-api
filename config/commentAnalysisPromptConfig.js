@@ -40,7 +40,7 @@ Rules:
   2. If new comments are provided, evaluate them along with the previously highlighted ones. Keep up to 3 of the most relevant overall (new, old, or a mix).
   3. If there are no new comments AND no previous highlighted comments, return an empty array [].
 - Never return more than 3 highlighted comments under any circumstance.
-- The "debateSummary" must be updated to reflect the entire discussion (historical + new), not just the new comments.
+- The "debateSummary" must be updated to reflect the entire discussion (historical + new), not just the new comments, and must be limited to **350 characters maximum**.
 - Sentiment values must be percentages (as strings, e.g., "50%") that sum to 100%. Recalculate this based on the total known corpus of comments if possible, or state an assumption if metadata is missing.
 - Output must be strictly valid JSON.
 

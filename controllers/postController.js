@@ -721,7 +721,7 @@ exports.sharePost = async (req, res, next) => {
 exports.getCommentAnalysis = async (req, res, next) => {
   try {
     const { entity } = req.params;
-    const bypassCache = false;
+    const bypassCache = false;  //Just for testing
     const cid = req.cid;
     const author = req?.user?.author ?? null;
 
@@ -760,6 +760,8 @@ exports.getCommentAnalysis = async (req, res, next) => {
     const commentQuery = buildCommentQuery(post._id, previousAnalysisDoc);
     const newComments = await Comment.find(commentQuery)
       .select('_id text repliesCount likesCount created_at author')
+      .sort({ created_at: -1 })
+      .limit(100)
       .lean();
 
     // Perform analysis
@@ -770,7 +772,6 @@ exports.getCommentAnalysis = async (req, res, next) => {
       newComments,
       previousAnalysisDoc?.analysis
     );
-
 
     // Ensure analysisResult.analysis exists
     const analysis = analysisResult.analysis ?? {};
@@ -791,7 +792,13 @@ exports.getCommentAnalysis = async (req, res, next) => {
     );
 
     // Update database and cache
-    await updateCommentAnalysis(cid, entity, finalAnalysis);
+    if (
+      finalAnalysis?.analysis?.highlightedComments &&
+      finalAnalysis.analysis.highlightedComments.length > 0
+    ) {
+      await updateCommentAnalysis(cid, entity, finalAnalysis);
+    }
+
     await cacheAnalysis(cacheKeys, finalAnalysis, targetLanguage);
 
     return res.status(200).json({ analysis: finalAnalysis });
