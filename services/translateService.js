@@ -2,7 +2,7 @@
 require('dotenv').config();
 const axios = require('axios');
 const { TRANSLATE_DETECT_API_URL, TRANSLATE_API_URL, TRANSLATE_API_KEY } = process.env;
-
+const { decodeHtmlEntities } = require('../utils/textUtils');
 /**
  * Detecta el idioma de un texto.
  * @param {string} text - Texto para detectar el idioma.
@@ -50,7 +50,8 @@ const translateService = async (text, targetLanguage) => {
       }
     );
 
-    return response.data.data.translations[0].translatedText;
+    const translatedText = response.data.data.translations[0].translatedText;
+    return decodeHtmlEntities(translatedText);
   } catch (error) {
     console.error('❌ Error translating the text:', error.message);
     throw error;

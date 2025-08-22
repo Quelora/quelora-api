@@ -801,9 +801,6 @@ exports.getPostLikes = async (req, res, next) => {
       if (!Array.isArray(commentIds) || commentIds.length === 0) {
         return res.status(400).json({ message: 'commentIds must be a non-empty array.' });
       }
-      if (!commentIds.every(id => mongoose.Types.ObjectId.isValid(id))) {
-        return res.status(400).json({ message: 'All commentIds must be valid ObjectIds.' });
-      }
     } catch (error) {
       return res.status(400).json({ message: 'Invalid commentIds format.' });
     }

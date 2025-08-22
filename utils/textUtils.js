@@ -33,5 +33,15 @@ const validateSearchQuery = (query) => {
   return query.trim();
 }
 
+const decodeHtmlEntities = (text) => {
+  const entities = {
+    '&amp;': '&',
+    '&quot;': '"',
+    '&#39;': "'",
+    '&lt;': '<',
+    '&gt;': '>',
+  };
+  return text.replace(/&amp;|&quot;|&#39;|&lt;|&gt;/g, (match) => entities[match]);
+};
 
-module.exports = { toUnicodeBold, validateSearchQuery };
+module.exports = { toUnicodeBold, validateSearchQuery, decodeHtmlEntities };
