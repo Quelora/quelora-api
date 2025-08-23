@@ -3,12 +3,13 @@ const express = require('express');
 const router = express.Router();
 const commentController = require('../controllers/commentController');
 const authMiddleware = require('../middlewares/authMiddleware');
+const captchaMiddleware = require('../middlewares/captchaMiddleware');
 
 const { globalRateLimiter, strictRateLimiter } = require('../middlewares/rateLimiterMiddleware');
 
 
-router.post('/:entity/comment', [globalRateLimiter, strictRateLimiter, authMiddleware], commentController.addComment);
-router.post('/:entity/comment/:comment/reply',[globalRateLimiter, strictRateLimiter, authMiddleware],commentController.addReply);
+router.post('/:entity/comment', [globalRateLimiter, strictRateLimiter, authMiddleware, captchaMiddleware ], commentController.addComment);
+router.post('/:entity/comment/:comment/reply',[globalRateLimiter, strictRateLimiter, authMiddleware, captchaMiddleware],commentController.addReply);
 
 router.put('/:entity/comment/:comment/like', [globalRateLimiter, strictRateLimiter, authMiddleware], commentController.likeComment);
 router.delete('/:entity/comment/:comment/delete', [globalRateLimiter, strictRateLimiter, authMiddleware ], commentController.deleteComment);

@@ -50,7 +50,8 @@ async function dynamicCorsConfig(req, callback) {
         'X-Region',
         'X-City',
         'X-Lat',
-        'X-Lon'
+        'X-Lon',
+        'X-Captcha-Token'
       ],
       exposedHeaders: [
         'X-Client-ID',
@@ -61,7 +62,8 @@ async function dynamicCorsConfig(req, callback) {
         'X-Region',
         'X-City',
         'X-Lat',
-        'X-Lon'
+        'X-Lon',
+        'X-Captcha-Token'
       ],
       credentials: true, // Allow cookies & authorization headers
       maxAge: 86400 // Cache preflight response for 24 hours

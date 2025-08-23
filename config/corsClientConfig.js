@@ -19,7 +19,7 @@ async function clientCorsConfig(req, callback) {
     const corsOptions = {
       origin: clientConfig.cors.allowedOrigins,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Id', 'X-Ip', 'X-Country', 'X-Region', 'X-City'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Id', 'X-Ip', 'X-Country', 'X-Region', 'X-City','X-Captcha-Token'],
       credentials: true,
       maxAge: 86400 // 24 horas
     };
