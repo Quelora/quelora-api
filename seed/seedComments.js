@@ -1,5 +1,5 @@
 // seedComments.js
-// Ejemplo de uso: POST_ID="68a47be3b0d2d47c60c27de6"  NUM_COMMENTS=72 NUM_WITH_REPLIES=10 node seedComments.js
+// Ejemplo de uso: POST_ID="68a5c8e703d56cbaaabcec5b"  NUM_COMMENTS=115 NUM_WITH_REPLIES=10 node seedComments.js
 
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
