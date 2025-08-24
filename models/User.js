@@ -7,7 +7,7 @@ const Post = require('./Post'); // Import Post model to access defaultConfig
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
 
 // Allowed configuration schema
-const allowedConfigKeys = ['login', 'moderation', 'toxicity', 'translation', 'geolocation', 'cors', 'language', 'modeDiscovery', 'discoveryDataUrl', 'entityConfig'];
+const allowedConfigKeys = ['login', 'moderation', 'toxicity', 'translation', 'geolocation', 'cors', 'language', 'modeDiscovery', 'discoveryDataUrl', 'entityConfig', 'captcha'];
 
 // Sub-schema for user-associated clients
 const clientSchema = new mongoose.Schema({
@@ -275,6 +275,9 @@ clientSchema.methods.validateModule = function(moduleName, moduleConfig) {
     case 'entityConfig':
       this.validateEntityConfig(moduleConfig);
       break;
+    case 'captcha':
+      this.validateCaptcha(moduleConfig);
+      break;
   }
 };
 
@@ -426,6 +429,42 @@ clientSchema.methods.validateEntityConfig = function(entityConfig) {
   }
 };
 
+// Specific validation for captcha
+clientSchema.methods.validateCaptcha = function(captchaConfig) {
+  // Validate enabled
+  if ('enabled' in captchaConfig && typeof captchaConfig.enabled !== 'boolean') {
+    throw new Error('captcha.enabled must be a boolean');
+  }
+
+  // Validate provider
+  if ('provider' in captchaConfig && !['turnstile', 'recaptcha'].includes(captchaConfig.provider)) {
+    throw new Error('captcha.provider must be either "turnstile" or "recaptcha"');
+  }
+
+  // Validate siteKey
+  if (captchaConfig.enabled && (!captchaConfig.siteKey || typeof captchaConfig.siteKey !== 'string' || captchaConfig.siteKey.length > 250)) {
+    throw new Error('captcha.siteKey must be a non-empty string with max length 250 when enabled');
+  }
+
+  // Validate secretKey
+  if (captchaConfig.enabled && (!captchaConfig.secretKey || typeof captchaConfig.secretKey !== 'string' || captchaConfig.secretKey.length > 250)) {
+    throw new Error('captcha.secretKey must be a non-empty string with max length 250 when enabled');
+  }
+
+  // Validate credentialsJson
+  if ('credentialsJson' in captchaConfig) {
+    if (typeof captchaConfig.credentialsJson !== 'string') {
+      throw new Error('captcha.credentialsJson must be a string');
+    }
+    if (captchaConfig.credentialsJson.length > 5000) {
+      throw new Error('captcha.credentialsJson cannot exceed 5000 characters');
+    }
+    if (captchaConfig.credentialsJson && !this.isValidJson(captchaConfig.credentialsJson)) {
+      throw new Error('captcha.credentialsJson must be a valid JSON string');
+    }
+  }
+};
+
 // Helper method to validate JSON
 clientSchema.methods.isValidJson = function(jsonString) {
   try {
@@ -463,6 +502,16 @@ clientSchema.pre('save', function(next) {
     if (config.login?.jwtSecret && config.login.jwtSecret !== '') {
       config.login.jwtSecretCipher = encrypt(config.login.jwtSecret, ENCRYPTION_KEY);
       config.login.jwtSecret = undefined; // Remove plaintext key
+    }
+
+    // Encrypt captcha secretKey and credentialsJson
+    if (config.captcha?.secretKey && config.captcha.secretKey !== '') {
+      config.captcha.secretKeyCipher = encrypt(config.captcha.secretKey, ENCRYPTION_KEY);
+      config.captcha.secretKey = undefined; // Remove plaintext key
+    }
+    if (config.captcha?.credentialsJson && config.captcha.credentialsJson !== '') {
+      config.captcha.credentialsJsonCipher = encrypt(config.captcha.credentialsJson, ENCRYPTION_KEY);
+      config.captcha.credentialsJson = undefined; // Remove plaintext JSON
     }
 
     this.markModified('config');
@@ -508,6 +557,16 @@ clientSchema.set('toJSON', {
         ret.config[moduleName].apiKey = decrypt(ret.config[moduleName].apiKeyCipher, ENCRYPTION_KEY);
         ret.config[moduleName].apiKeyCipher = undefined;
       }
+    }
+
+    if (ret.config?.captcha?.secretKeyCipher) {
+      ret.config.captcha.secretKey = decrypt(ret.config.captcha.secretKeyCipher, ENCRYPTION_KEY);
+      ret.config.captcha.secretKeyCipher = undefined;
+    }
+
+    if (ret.config?.captcha?.credentialsJsonCipher) {
+      ret.config.captcha.credentialsJson = decrypt(ret.config.captcha.credentialsJsonCipher, ENCRYPTION_KEY);
+      ret.config.captcha.credentialsJsonCipher = undefined;
     }
     
     if (ret.vapid?.privateKeyCipher) {
@@ -659,6 +718,16 @@ userSchema.methods.decryptConf = function(conf) {
   if (decryptedConf.login?.jwtSecretCipher) {
     decryptedConf.login.jwtSecret = decrypt(decryptedConf.login.jwtSecretCipher, ENCRYPTION_KEY);
     decryptedConf.login.jwtSecretCipher = undefined;
+  }
+
+  // Decrypt captcha fields
+  if (decryptedConf.captcha?.secretKeyCipher) {
+    decryptedConf.captcha.secretKey = decrypt(decryptedConf.captcha.secretKeyCipher, ENCRYPTION_KEY);
+    decryptedConf.captcha.secretKeyCipher = undefined;
+  }
+  if (decryptedConf.captcha?.credentialsJsonCipher) {
+    decryptedConf.captcha.credentialsJson = decrypt(decryptedConf.captcha.credentialsJsonCipher, ENCRYPTION_KEY);
+    decryptedConf.captcha.credentialsJsonCipher = undefined;
   }
   
   return decryptedConf;
