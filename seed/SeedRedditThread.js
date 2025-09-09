@@ -1,6 +1,5 @@
-// SeedRedditThread.js
-// USO: CID="QU-ME7HF2BN-E8QD9" REDDIT_URL=<url_del_hilo> node SeedRedditThread.js
-// CID="QU-ME7HF2BN-E8QD9" REDDIT_URL="https://www.reddit.com/r/worldnews/comments/1hd8u5q/javier_milei_ends_budget_deficit_in_argentina/" node SeedRedditThread.js
+// SeedRedditThread.js - Versión optimizada para primer nivel
+// USO: CID="QU-ME7MZ3WI-3CUPR" REDDIT_URL=https://reddit.com/r/worldnews/comments/1hd8u5q/javier_milei_ends_budget_deficit_in_argentina/ node SeedRedditThread.js
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
 const connectDB = require('../db');
@@ -12,9 +11,10 @@ const axios = require('axios');
 
 const REDDIT_THREAD_URL = process.env.REDDIT_URL;
 const REDDIT_LIMIT = process.env.REDDIT_LIMIT || 1000;
+const REDDIT_CLIENT_ID = process.env.REDDIT_CLIENT_ID;
+const REDDIT_CLIENT_SECRET = process.env.REDDIT_CLIENT_SECRET;
 
 // Sets para almacenar IDs de comentarios procesados, autores únicos y nombres válidos
-const processedCommentIds = new Set();
 const uniqueAuthors = new Set();
 const usedValidNames = new Set();
 
@@ -31,6 +31,73 @@ const CITIES = [
   { name: "Berlin", coords: [13.4050, 52.5200] },
   { name: "Tokyo", coords: [139.6917, 35.6895] }
 ];
+
+// Variable para almacenar el token de acceso
+let accessToken = null;
+
+// Configuración de timeouts y límites
+const TIMEOUT_MS = 15000;
+const BATCH_SIZE = 20;
+
+/**
+ * Obtiene token de acceso OAuth2 de Reddit
+ */
+async function getRedditAccessToken() {
+  try {
+    console.log('🔑 Obteniendo token de acceso de Reddit...');
+    
+    const auth = Buffer.from(`${REDDIT_CLIENT_ID}:${REDDIT_CLIENT_SECRET}`).toString('base64');
+    
+    const response = await axios.post('https://www.reddit.com/api/v1/access_token',
+      'grant_type=client_credentials',
+      {
+        headers: {
+          'Authorization': `Basic ${auth}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'Quelora-Seeder/1.1'
+        },
+        timeout: 10000
+      }
+    );
+
+    accessToken = response.data.access_token;
+    console.log('✅ Token de acceso obtenido exitosamente');
+    return accessToken;
+    
+  } catch (error) {
+    console.error('❌ Error obteniendo token de acceso:', error.response?.data || error.message);
+    throw error;
+  }
+}
+
+/**
+ * Realiza una solicitud autenticada a la API de Reddit
+ */
+async function makeAuthenticatedRedditRequest(url) {
+  if (!accessToken) {
+    await getRedditAccessToken();
+  }
+
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'User-Agent': 'Quelora-Seeder/1.1'
+      },
+      timeout: TIMEOUT_MS
+    });
+    
+    return response.data;
+    
+  } catch (error) {
+    if (error.response?.status === 401) {
+      console.log('🔄 Token expirado, obteniendo nuevo token...');
+      await getRedditAccessToken();
+      return makeAuthenticatedRedditRequest(url);
+    }
+    throw error;
+  }
+}
 
 /**
  * Genera coordenadas aleatorias alrededor de una ciudad
@@ -91,54 +158,9 @@ const generateValidName = (redditUsername) => {
 };
 
 /**
- * Obtiene recursivamente todos los comentarios que faltan (objetos "more")
+ * Obtiene datos del hilo de Reddit (solo comentarios de primer nivel)
  */
-async function fetchAllMissingComments(commentThings, linkId) {
-  const comments = commentThings.filter(c => c.kind === 't1' && !processedCommentIds.has(c.data.id)).map(c => {
-    processedCommentIds.add(c.data.id);
-    return c.data;
-  });
-  const moreObjects = commentThings.filter(c => c.kind === 'more');
-
-  if (moreObjects.length === 0) {
-    return comments;
-  }
-
-  const moreIds = moreObjects.flatMap(more => more.data.children).filter(id => !processedCommentIds.has(id));
-  console.log(`🔍 Encontrados ${moreIds.length} IDs de comentarios adicionales para obtener...`);
-
-  if (moreIds.length === 0) {
-    return comments;
-  }
-
-  const newCommentThings = [];
-  const BATCH_SIZE_MORE = 100;
-
-  for (let i = 0; i < moreIds.length; i += BATCH_SIZE_MORE) {
-    const batch = moreIds.slice(i, i + BATCH_SIZE_MORE);
-    const moreChildrenUrl = `https://www.reddit.com/api/morechildren.json?api_type=json&link_id=${linkId}&children=${batch.join(',')}`;
-    
-    try {
-      const response = await axios.get(moreChildrenUrl, {
-        headers: { 'User-Agent': 'Quelora-Seeder/1.1' },
-        timeout: 30000
-      });
-      if (response.data.json && response.data.json.data && response.data.json.data.things) {
-        newCommentThings.push(...response.data.json.data.things);
-      }
-    } catch (error) {
-      console.error(`❌ Error obteniendo lote de comentarios adicionales: ${error.message}`);
-    }
-  }
-
-  const fetchedNewComments = await fetchAllMissingComments(newCommentThings, linkId);
-  return comments.concat(fetchedNewComments);
-}
-
-/**
- * Obtiene datos del hilo de Reddit
- */
-async function fetchRedditData(threadUrl, limit = 1000) {
+async function fetchRedditData(threadUrl, limit = 100) {
   try {
     const threadMatch = threadUrl.match(/comments\/([a-z0-9]+)/i);
     if (!threadMatch) throw new Error('URL de Reddit inválida');
@@ -146,24 +168,31 @@ async function fetchRedditData(threadUrl, limit = 1000) {
     const threadId = threadMatch[1];
     const subreddit = threadUrl.split('/r/')[1].split('/')[0];
     
-    const apiUrl = `https://www.reddit.com/r/${subreddit}/comments/${threadId}.json?limit=${limit}&depth=10`;
+    const apiUrl = `https://oauth.reddit.com/r/${subreddit}/comments/${threadId}.json?limit=${limit}&depth=1`;
     
-    console.log(`📡 Obteniendo datos iniciales de: ${apiUrl}`);
+    console.log(`📡 Obteniendo datos de: ${apiUrl}`);
     
-    const response = await axios.get(apiUrl, {
-      headers: { 'User-Agent': 'Quelora-Seeder/1.1' },
-      timeout: 30000
-    });
+    const response = await makeAuthenticatedRedditRequest(apiUrl);
 
-    const [postData, commentsData] = response.data;
+    const [postData, commentsData] = response;
     const post = postData.data.children[0].data;
-    const initialCommentThings = commentsData.data.children;
+    const comments = commentsData.data.children;
 
-    console.log('✅ Datos iniciales obtenidos. Expandiendo todos los comentarios...');
-    processedCommentIds.clear(); // Limpiar el Set para esta nueva ejecución
-    const allComments = await fetchAllMissingComments(initialCommentThings, post.name);
-    
-    console.log(`📦 Total de comentarios obtenidos después de expandir: ${allComments.length}`);
+    console.log(`📦 Total de comentarios de primer nivel obtenidos: ${comments.length}`);
+
+    // Filtrar solo comentarios de primer nivel y eliminar [deleted]/[removed]
+    const filteredComments = comments
+      .filter(comment => comment.kind === 't1')
+      .map(comment => comment.data)
+      .filter(comment => 
+        comment.author !== '[deleted]' && 
+        comment.body !== '[deleted]' &&
+        comment.body !== '[removed]' &&
+        comment.author &&
+        comment.body
+      );
+
+    console.log(`✅ Comentarios válidos después de filtrar: ${filteredComments.length}`);
 
     return {
       post: {
@@ -176,7 +205,7 @@ async function fetchRedditData(threadUrl, limit = 1000) {
         author: post.author,
         url: `https://reddit.com${post.permalink}`
       },
-      comments: processCommentsTree(allComments)
+      comments: filteredComments
     };
 
   } catch (error) {
@@ -186,82 +215,13 @@ async function fetchRedditData(threadUrl, limit = 1000) {
 }
 
 /**
- * Procesa los comentarios en estructura de árbol, manejando comentarios huérfanos
- */
-function processCommentsTree(comments) {
-  const commentMap = new Map();
-  const rootComments = [];
-  const orphanedComments = []; // Almacena comentarios cuyos padres no se han encontrado aún
-
-  // Paso 1: Mapear todos los comentarios por su ID
-  comments.forEach(comment => {
-    if (!comment || !comment.id) return;
-    
-    commentMap.set(comment.id, {
-      id: comment.id,
-      author: comment.author || 'unknown',
-      text: comment.body || '',
-      upvotes: comment.ups || 0,
-      downvotes: comment.downs || 0,
-      created: comment.created_utc || Date.now() / 1000,
-      parent_id: comment.parent_id,
-      replies: []
-    });
-  });
-
-  // Paso 2: Construir el árbol inicial
-  commentMap.forEach(comment => {
-    if (comment.parent_id && comment.parent_id.startsWith('t3_')) {
-      rootComments.push(comment);
-    } else if (comment.parent_id && comment.parent_id.startsWith('t1_')) {
-      const parentId = comment.parent_id.substring(3);
-      const parentComment = commentMap.get(parentId);
-      if (parentComment) {
-        parentComment.replies.push(comment);
-      } else {
-        orphanedComments.push(comment); // Guardar comentarios huérfanos
-      }
-    }
-  });
-
-  // Paso 3: Reintentar anidar comentarios huérfanos
-  let attempts = 0;
-  const maxAttempts = 5; // Evitar bucles infinitos
-  while (orphanedComments.length > 0 && attempts < maxAttempts) {
-    const stillOrphaned = [];
-    orphanedComments.forEach(comment => {
-      if (comment.parent_id && comment.parent_id.startsWith('t1_')) {
-        const parentId = comment.parent_id.substring(3);
-        const parentComment = commentMap.get(parentId);
-        if (parentComment) {
-          parentComment.replies.push(comment);
-        } else {
-          stillOrphaned.push(comment);
-        }
-      }
-    });
-    orphanedComments.length = 0;
-    orphanedComments.push(...stillOrphaned);
-    attempts++;
-  }
-
-  // Paso 4: Tratar los comentarios huérfanos restantes como raíz
-  if (orphanedComments.length > 0) {
-    console.log(`⚠️ ${orphanedComments.length} comentarios huérfanos tratados como raíz`);
-    rootComments.push(...orphanedComments);
-  }
-
-  return rootComments;
-}
-
-/**
  * Crea o obtiene un perfil para un autor de Reddit
  */
 async function getOrCreateProfile(redditAuthor) {
   const validName = generateValidName(redditAuthor);
-  const existingProfile = await Profile.findOne({ name: validName });
+  const existingProfile = await Profile.findOne({ name: validName }).maxTimeMS(TIMEOUT_MS);
   if (existingProfile) {
-    console.log(`✅ Perfil existente encontrado: ${validName} (${redditAuthor})`);
+    console.log(`✅ Perfil existente: ${validName}`);
     uniqueAuthors.add(redditAuthor);
     return existingProfile;
   }
@@ -279,7 +239,7 @@ async function getOrCreateProfile(redditAuthor) {
     family_name: 'Reddit',
     locale: 'en',
     email: `${validName}@reddit.quelora.com`,
-    picture: `https://www.redditstatic.com/avatars/defaults/v2/avatar_default_${Math.floor(Math.random() * 8)}.png`,
+    picture: `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70) + 1}`,
     bookmarksCount: 0,
     commentsCount: 0,
     followersCount: 0,
@@ -326,7 +286,7 @@ async function getOrCreateProfile(redditAuthor) {
   try {
     const profile = new Profile(profileData);
     await profile.save();
-    console.log(`✅ Perfil creado: ${validName} (${redditAuthor})`);
+    console.log(`✅ Perfil creado: ${validName}`);
     return profile;
   } catch (error) {
     console.error(`❌ Error creando perfil para ${redditAuthor}:`, error.message);
@@ -338,9 +298,9 @@ async function getOrCreateProfile(redditAuthor) {
  * Crea o encuentra el post principal
  */
 async function createOrFindPost(redditData, entityId) {
-  const existingPost = await Post.findOne({ entity: entityId });
+  const existingPost = await Post.findOne({ entity: entityId }).maxTimeMS(TIMEOUT_MS);
   if (existingPost) {
-    console.log(`✅ Post existente encontrado: ${existingPost._id}`);
+    console.log(`✅ Post existente: ${existingPost._id}`);
     return existingPost;
   }
 
@@ -371,75 +331,83 @@ async function createOrFindPost(redditData, entityId) {
 }
 
 /**
- * Crea comentarios de forma recursiva, evitando duplicados
+ * Crea comentarios de forma controlada con límite de concurrencia
  */
-async function createCommentsRecursive(comments, postId, entityId, parentId = null) {
-  const createdComments = [];
+async function createComments(comments, postId, entityId) {
+    // FILTRAR primero los comentarios válidos
+    const validComments = comments.filter(comment => 
+        comment && comment.author && comment.body && typeof comment.body === 'string'
+    );
 
-  for (const commentData of comments) {
-    try {
-      if (!commentData.author || !commentData.text) {
-        console.log(`⚠️ Comentario sin autor o texto, saltando: ${commentData.id}`);
-        continue;
-      }
+    const createdComments = [];
+    let processed = 0;
+    const total = validComments.length; // ← Usar el total de comentarios VÁLIDOS
 
-      const profile = await getOrCreateProfile(commentData.author);
-      
-      // Verificar si ya existe un comentario con el mismo texto y autor
-      const existingComment = await Comment.findOne({
-        post: postId,
-        profile_id: profile._id,
-        text: commentData.text.substring(0, 1000)
-      });
+    console.log(`⏳ Creando ${total} comentarios válidos de ${comments.length} totales...`);
 
-      if (existingComment) {
-        console.log(`✅ Comentario existente encontrado para ${commentData.author}: ${commentData.text.substring(0, 50)}...`);
-        if (commentData.replies && commentData.replies.length > 0) {
-          const replies = await createCommentsRecursive(
-            commentData.replies,
-            postId,
-            entityId,
-            existingComment._id
-          );
-          createdComments.push(...replies);
+    for (let i = 0; i < validComments.length; i += BATCH_SIZE) {
+        const batch = validComments.slice(i, i + BATCH_SIZE);
+        const batchPromises = [];
+
+        for (const commentData of batch) {
+            batchPromises.push((async () => {
+                try {
+                    const profile = await getOrCreateProfile(commentData.author);
+                    
+                    const existingComment = await Comment.findOne({
+                        post: postId,
+                        profile_id: profile._id,
+                        text: commentData.body.substring(0, 1000)
+                    }).maxTimeMS(TIMEOUT_MS);
+
+                    if (existingComment) {
+                        console.log(`⏩ Comentario duplicado saltado: ${commentData.body.substring(0, 30)}...`);
+                        return null;
+                    }
+
+                    const comment = new Comment({
+                        post: postId,
+                        entity: entityId,
+                        parent: null,
+                        profile_id: profile._id,
+                        author: profile.author,
+                        text: commentData.body.substring(0, 1000),
+                        language: 'en',
+                        likesCount: commentData.upvotes || 0,
+                        created_at: new Date((commentData.created_utc || Date.now() / 1000) * 1000),
+                        updated_at: new Date((commentData.created_utc || Date.now() / 1000) * 1000)
+                    });
+
+                    await comment.save();
+                    processed++;
+                    console.log(`✅ Comentario ${processed}/${total} creado: ${commentData.author} - "${commentData.body.substring(0, 30)}..."`);
+                    return comment;
+
+                } catch (error) {
+                    console.error(`❌ Error con comentario de ${commentData.author}:`, error.message);
+                    return null;
+                }
+            })());
         }
-        continue;
-      }
 
-      const comment = new Comment({
-        post: postId,
-        entity: entityId,
-        parent: parentId,
-        profile_id: profile._id,
-        author: profile.author,
-        text: commentData.text.substring(0, 1000),
-        language: 'en',
-        likesCount: commentData.upvotes || 0,
-        created_at: new Date((commentData.created || Date.now() / 1000) * 1000),
-        updated_at: new Date((commentData.created || Date.now() / 1000) * 1000)
-      });
-
-      await comment.save();
-      console.log(`✅ Comentario creado para ${commentData.author}: ${commentData.text.substring(0, 50)}...`);
-      createdComments.push(comment);
-
-      if (commentData.replies && commentData.replies.length > 0) {
-        const replies = await createCommentsRecursive(
-          commentData.replies,
-          postId,
-          entityId,
-          comment._id
-        );
-        createdComments.push(...replies);
-      }
-
-    } catch (error) {
-      console.error(`❌ Error creando comentario para ${commentData.author}:`, error.message);
+        try {
+            const batchResults = await Promise.allSettled(batchPromises);
+            const successfulComments = batchResults
+                .filter(result => result.status === 'fulfilled' && result.value !== null)
+                .map(result => result.value);
+            
+            createdComments.push(...successfulComments);
+            
+        } catch (batchError) {
+            console.error('❌ Error en lote de comentarios:', batchError.message);
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
     }
-  }
 
-  return createdComments;
+    return createdComments;
 }
+
 
 /**
  * Función principal para seedear el hilo de Reddit
@@ -451,25 +419,32 @@ async function seedRedditThread() {
       throw new Error('❌ REDDIT_URL no definido en variables de entorno');
     }
 
+    if (!REDDIT_CLIENT_ID || !REDDIT_CLIENT_SECRET) {
+      throw new Error('❌ Credenciales de Reddit no configuradas en .env');
+    }
+
     console.log('⏳ Conectando a la base de datos...');
     await connectDB();
     console.log('✅ Conexión a la base de datos establecida');
 
+    console.log('⏳ Autenticando con Reddit API...');
+    await getRedditAccessToken();
+
     const entityId = generateEntityId(REDDIT_THREAD_URL);
 
-    console.log('⏳ Obteniendo datos de Reddit...');
+    console.log('⏳ Obteniendo datos de Reddit (solo primer nivel)...');
     const redditData = await fetchRedditData(REDDIT_THREAD_URL, REDDIT_LIMIT);
 
     console.log('✅ Datos obtenidos:');
     console.log(`   - Post: ${redditData.post.title}`);
-    console.log(`   - ${redditData.comments.length} comentarios raíz (después de expandir)`);
+    console.log(`   - ${redditData.comments.length} comentarios válidos de primer nivel`);
     console.log(`   - Autor original: ${redditData.post.author}`);
 
     console.log('⏳ Verificando/creando post...');
     const post = await createOrFindPost(redditData, entityId);
 
     console.log('⏳ Creando comentarios...');
-    const allComments = await createCommentsRecursive(redditData.comments, post._id, entityId);
+    const allComments = await createComments(redditData.comments, post._id, entityId);
 
     console.log('⏳ Actualizando conteo de comentarios en el post...');
     await Post.findByIdAndUpdate(post._id, {
@@ -479,7 +454,7 @@ async function seedRedditThread() {
 
     console.log('🎉 Hilo de Reddit importado exitosamente!');
     console.log(`   - Post: ${post._id}`);
-    console.log(`   - Total comentarios: ${allComments.length}`);
+    console.log(`   - Total comentarios creados: ${allComments.length}`);
     console.log(`   - Perfiles únicos: ${uniqueAuthors.size}`);
 
   } catch (err) {
@@ -503,5 +478,5 @@ async function seedRedditThread() {
 }
 
 // Ejecutar el script
-console.log('🚀 Iniciando seedRedditThread...');
+console.log('🚀 Iniciando seedRedditThread (solo primer nivel)...');
 seedRedditThread();
