@@ -343,7 +343,7 @@ const postSchema = new mongoose.Schema({
     type: String,
     required: false,
     trim: true,
-    maxlength: 100
+    maxlength: 500
   },
   title: {
     type: String,
