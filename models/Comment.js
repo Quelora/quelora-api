@@ -29,6 +29,12 @@ const commentSchema = new mongoose.Schema({
   text: {
     type: String,
     required: true
+  },  
+  reference: {
+    type: String,
+    required: true,
+    unique: true,
+    index: true
   },
   language: {
     type: String,

@@ -391,6 +391,10 @@ const postSchema = new mongoose.Schema({
     type: Number,
     default: 0 
   }, 
+  moreCommentsRef: {
+    type: [String],
+    default: []
+  },
   deletion: {
     status: {
       type: String,
