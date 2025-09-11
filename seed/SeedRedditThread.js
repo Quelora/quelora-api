@@ -1,5 +1,5 @@
-// SeedRedditThread.js - Versión 2.1 Final
-// USO: CID="QU-ME7HF2BN-E8QD9" REDDIT_URL="https://www.reddit.com/r/news/comments/1mhkv6g/elon_musk_awarded_29_billion_pay_package_from/" node SeedRedditThread.js
+// SeedRedditThread.js - Versión 2.4
+// USO: CID="QU-ME7HF2BN-E8QD9" REDDIT_URL="https://www.reddit.com/r/gameofthrones/comments/bn6xey/spoilers_postepisode_discussion_season_8_episode_5/" node SeedRedditThread.js
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
 const connectDB = require('../db');
@@ -8,6 +8,7 @@ const Post = require('../models/Post');
 const Comment = require('../models/Comment');
 const crypto = require('crypto');
 const axios = require('axios');
+const cheerio = require('cheerio');
 
 const REDDIT_THREAD_URL = process.env.REDDIT_URL;
 const REDDIT_LIMIT = process.env.REDDIT_LIMIT || 1000;
@@ -47,7 +48,7 @@ async function getRedditAccessToken() {
                 headers: {
                     'Authorization': `Basic ${auth}`,
                     'Content-Type': 'application/x-www-form-urlencoded',
-                    'User-Agent': 'Quelora-Seeder/2.1'
+                    'User-Agent': 'Quelora-Seeder/2.4'
                 },
                 timeout: 10000
             }
@@ -74,7 +75,7 @@ async function makeAuthenticatedRedditRequest(url, method = 'get', data = null) 
             url: url,
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
-                'User-Agent': 'Quelora-Seeder/2.1'
+                'User-Agent': 'Quelora-Seeder/2.4'
             },
             timeout: TIMEOUT_MS
         };
@@ -158,6 +159,49 @@ const generateValidName = (redditUsername) => {
 };
 
 /**
+ * Decodifica entidades HTML (como &amp; a &)
+ */
+const decodeHtmlEntities = (str) => {
+    if (!str) return str;
+    return str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+};
+
+/**
+ * Extrae descripción e imagen de una página web
+ */
+async function scrapeWebpage(url) {
+    try {
+        console.log(`🌐 Scrapeando página web: ${url}`);
+        const response = await axios.get(url, {
+            headers: { 'User-Agent': 'Quelora-Seeder/2.4' },
+            timeout: TIMEOUT_MS
+        });
+        const $ = cheerio.load(response.data);
+
+        // Extraer descripción (meta description o og:description)
+        let description = $('meta[name="description"]').attr('content') || $('meta[property="og:description"]').attr('content') || '';
+        description = decodeHtmlEntities(description);
+
+        // Extraer imagen (og:image o primera imagen del artículo)
+        let image = $('meta[property="og:image"]').attr('content') || $('article img').first().attr('src') || null;
+        image = decodeHtmlEntities(image);
+
+        // Asegurar que la imagen sea una URL absoluta
+        if (image && !image.startsWith('http')) {
+            const urlObj = new URL(url);
+            image = new URL(image, urlObj.origin).href;
+        }
+
+        console.log(`📝 Descripción extraída: ${description ? description.substring(0, 50) + '...' : 'Ninguna'}`);
+        console.log(`🖼️ Imagen extraída: ${image || 'Ninguna'}`);
+        return { description, image };
+    } catch (error) {
+        console.error(`❌ Error scrapeando ${url}:`, error.message);
+        return { description: '', image: null };
+    }
+}
+
+/**
  * Obtiene datos iniciales del hilo de Reddit
  */
 async function fetchRedditData(threadUrl, limit = 1000) {
@@ -188,6 +232,30 @@ async function fetchRedditData(threadUrl, limit = 1000) {
         console.log(`✅ Comentarios válidos iniciales: ${validComments.length}`);
         console.log(`⏩ "More" comments de nivel superior encontrados: ${moreComments.length}`);
 
+        // Determinar la URL de la imagen desde Reddit
+        let imageUrl = null;
+        if (post.preview && post.preview.images && post.preview.images.length > 0) {
+            imageUrl = decodeHtmlEntities(post.preview.images[0].source.url);
+        } else if (post.url && (post.url.endsWith('.jpg') || post.url.endsWith('.png') || post.url.endsWith('.gif'))) {
+            imageUrl = decodeHtmlEntities(post.url);
+        } else if (post.url_overridden_by_dest && (post.url_overridden_by_dest.endsWith('.jpg') || post.url_overridden_by_dest.endsWith('.png') || post.url_overridden_by_dest.endsWith('.gif'))) {
+            imageUrl = decodeHtmlEntities(post.url_overridden_by_dest);
+        }
+
+        // Obtener descripción e imagen desde la página web si es un link post
+        let description = post.selftext || '';
+        let scrapedImage = imageUrl;
+        if (!description && post.url && !post.is_self && post.url.startsWith('http')) {
+            const scrapedData = await scrapeWebpage(post.url);
+            description = scrapedData.description || '';
+            if (!imageUrl) {
+                scrapedImage = scrapedData.image || null;
+            }
+        }
+
+        console.log(`📝 Descripción final: ${description ? description.substring(0, 50) + '...' : 'Ninguna'}`);
+        console.log(`🖼️ Imagen final: ${scrapedImage || 'Ninguna'}`);
+
         return {
             post: {
                 title: post.title,
@@ -196,7 +264,9 @@ async function fetchRedditData(threadUrl, limit = 1000) {
                 comments: post.num_comments,
                 created: post.created_utc,
                 author: post.author,
-                url: `https://reddit.com${post.permalink}`
+                url: `https://reddit.com${post.permalink}`,
+                image: scrapedImage,
+                description: description
             },
             comments: validComments,
             moreComments: moreComments
@@ -332,9 +402,10 @@ async function createOrFindPost(redditData, entityId, moreComments) {
         entity: entityId,
         reference: redditData.post.url,
         title: redditData.post.title.substring(0, 100),
-        description: (redditData.post.content || '').substring(0, 200),
+        description: redditData.post.description || '', // Use scraped or Reddit description
         type: 'reddit_crosspost',
         link: redditData.post.url,
+        image: redditData.post.image || null, // Use scraped or Reddit image
         likesCount: redditData.post.upvotes || 0,
         commentCount: redditData.post.comments || 0,
         viewsCount: Math.floor((redditData.post.upvotes || 0) * 15),
@@ -391,6 +462,7 @@ async function processCommentsRecursively(commentsData, postId, entityId, parent
                     text: commentData.body,
                     language: 'en',
                     likesCount: commentData.ups || 0,
+                    repliesCount: 0, // Initialize to 0, will be updated if replies exist
                     created_at: new Date(commentData.created_utc * 1000),
                     updated_at: new Date(commentData.created_utc * 1000)
                 });
@@ -398,6 +470,15 @@ async function processCommentsRecursively(commentsData, postId, entityId, parent
                 await newComment.save();
                 createdCommentsCount++;
                 console.log(`✅ Comentario creado (Nivel ${parentId ? 'Réplica' : 'Superior'}): ${commentData.author} - "${commentData.body.substring(0, 30)}..." (ID: ${newComment._id})`);
+
+                // Increment repliesCount for the parent comment if this is a reply
+                if (parentId) {
+                    await Comment.findByIdAndUpdate(parentId, {
+                        $inc: { repliesCount: 1 },
+                        updated_at: new Date()
+                    });
+                    console.log(`📈 Incrementado repliesCount para comentario padre ${parentId}`);
+                }
                 
                 if (commentData.replies && commentData.replies.kind === 'Listing' && commentData.replies.data.children.length > 0) {
                     console.log(`🔄 Recursando en ${commentData.replies.data.children.length} réplicas...`);
@@ -424,7 +505,6 @@ async function processCommentsRecursively(commentsData, postId, entityId, parent
     console.log(`🏁 Finalizado procesamiento recursivo: ${createdCommentsCount} creados, ${newMoreCommentIds.length} more IDs recolectados.`);
     return { count: createdCommentsCount, moreIds: newMoreCommentIds };
 }
-
 
 /**
  * Función principal que orquesta todo el proceso
@@ -489,8 +569,8 @@ async function seedRedditThread() {
 
             } else {
                 console.log("⚠️ No se recibieron comentarios del lote, eliminando IDs procesados.");
-                 await Post.findByIdAndUpdate(post._id, { $pullAll: { moreCommentsRef: idsToFetch } });
-                 post.moreCommentsRef = post.moreCommentsRef.slice(idsToFetch.length);
+                await Post.findByIdAndUpdate(post._id, { $pullAll: { moreCommentsRef: idsToFetch } });
+                post.moreCommentsRef = post.moreCommentsRef.slice(idsToFetch.length);
             }
             console.log(`📊 moreCommentsRef restantes: ${post.moreCommentsRef.length}`);
             
@@ -505,9 +585,9 @@ async function seedRedditThread() {
         });
 
         console.log('🎉 Hilo de Reddit importado/actualizado exitosamente!');
-        console.log(`   - Post: ${post._id}`);
-        console.log(`   - Total comentarios en DB: ${finalCommentCount}`);
-        console.log(`   - Perfiles únicos creados/usados: ${uniqueAuthors.size}`);
+        console.log(`   - Post: ${post._id}`);
+        console.log(`   - Total comentarios en DB: ${finalCommentCount}`);
+        console.log(`   - Perfiles únicos creados/usados: ${uniqueAuthors.size}`);
 
     } catch (err) {
         console.error('❌ Error fatal en el seed:', err.message, err.stack);
@@ -520,5 +600,5 @@ async function seedRedditThread() {
     }
 }
 
-console.log('🚀 Iniciando seedRedditThread (versión 2.1 Final)...');
+console.log('🚀 Iniciando seedRedditThread (versión 2.4)...');
 seedRedditThread();

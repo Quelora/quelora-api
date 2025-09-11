@@ -366,8 +366,11 @@ const postSchema = new mongoose.Schema({
   description: {
     type: String,
     required: false,
-    trim: true,
-    maxlength: 200
+    trim: true
+  },
+  image: { 
+    type: String, 
+    default: null 
   },
   config: {
     type: mongoose.Schema.Types.Mixed,
