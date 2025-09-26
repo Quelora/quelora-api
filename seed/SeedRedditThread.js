@@ -1,40 +1,29 @@
-// SeedRedditThread.js - Versión 2.4
-// USO: CID="QU-ME7HF2BN-E8QD9" REDDIT_URL="https://www.reddit.com/r/gameofthrones/comments/bn6xey/spoilers_postepisode_discussion_season_8_episode_5/" node SeedRedditThread.js
+// SeedRedditThread.js 
+// USO: node SeedRedditThread.js
+
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
 const connectDB = require('../db');
-const Profile = require('../models/Profile');
 const Post = require('../models/Post');
-const Comment = require('../models/Comment');
-const crypto = require('crypto');
 const axios = require('axios');
-const cheerio = require('cheerio');
 
-const REDDIT_THREAD_URL = process.env.REDDIT_URL;
-const REDDIT_LIMIT = process.env.REDDIT_LIMIT || 1000;
 const REDDIT_CLIENT_ID = process.env.REDDIT_CLIENT_ID;
 const REDDIT_CLIENT_SECRET = process.env.REDDIT_CLIENT_SECRET;
+const POST_LIMIT = process.env.TRENDING_LIMIT || 500;
+const MIN_COMMENTS = process.env.MIN_COMMENTS || 50; // Mínimo de comentarios
 
-// Sets para almacenar autores únicos y nombres válidos para optimizar
-const uniqueAuthors = new Set();
-const usedValidNames = new Set();
-const authorToNameMap = new Map();
-
-// Lista de ciudades para asignar ubicaciones realistas
-const CITIES = [
-    { name: "New York", coords: [-74.0060, 40.7128] },
-    { name: "Los Angeles", coords: [-118.2437, 34.0522] },
-    { name: "Chicago", coords: [-87.6298, 41.8781] },
-    { name: "London", coords: [-0.1278, 51.5074] },
-    { name: "Berlin", coords: [13.4050, 52.5200] },
-    { name: "Tokyo", coords: [139.6917, 35.6895] }
+// Subreddits de tecnología/programación a monitorear
+const TECH_SUBREDDITS = [
+    'programming', 'technology', 'computerscience', 'coding', 
+    'webdev', 'learnprogramming', 'compsci', 'softwareengineering',
+    'artificial', 'MachineLearning', 'datascience', 'python',
+    'javascript', 'java', 'cpp', 'golang', 'rust', 'php',
+    'reactjs', 'node', 'vuejs', 'angular', 'django', 'flask',
+    'devops', 'sysadmin', 'cybersecurity', 'networking',
+    'apple', 'android', 'windows', 'linux', 'macos'
 ];
 
 let accessToken = null;
-
-// Configuración de timeouts y límites
-const TIMEOUT_MS = 25000;
-const MORE_COMMENTS_BATCH_SIZE = 100; // Límite de IDs por petición a morechildren
 
 /**
  * Obtiene token de acceso OAuth2 de Reddit
@@ -48,557 +37,362 @@ async function getRedditAccessToken() {
                 headers: {
                     'Authorization': `Basic ${auth}`,
                     'Content-Type': 'application/x-www-form-urlencoded',
-                    'User-Agent': 'Quelora-Seeder/2.4'
+                    'User-Agent': 'TechPosts-Importer/1.0'
                 },
                 timeout: 10000
             }
         );
         accessToken = response.data.access_token;
-        console.log('✅ Token de acceso obtenido exitosamente');
+        console.log('✅ Token de acceso obtenido');
         return accessToken;
     } catch (error) {
-        console.error('❌ Error obteniendo token de acceso:', error.response?.data || error.message);
+        console.error('❌ Error obteniendo token:', error.response?.data || error.message);
         throw error;
     }
 }
 
 /**
- * Realiza una solicitud autenticada a la API de Reddit
+ * Realiza solicitud autenticada a Reddit API
  */
-async function makeAuthenticatedRedditRequest(url, method = 'get', data = null) {
+async function makeRedditRequest(url) {
     if (!accessToken) {
         await getRedditAccessToken();
     }
+    
     try {
-        const config = {
-            method: method,
-            url: url,
+        const response = await axios.get(url, {
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
-                'User-Agent': 'Quelora-Seeder/2.4'
+                'User-Agent': 'TechPosts-Importer/1.0'
             },
-            timeout: TIMEOUT_MS
-        };
-        if (method === 'post') {
-            config.data = data;
-            config.headers['Content-Type'] = 'application/x-www-form-urlencoded';
-        }
-        const response = await axios(config);
+            timeout: 15000
+        });
         return response.data;
     } catch (error) {
-        console.error('❌ Error en solicitud a Reddit:', error.message, error.response?.data);
+        console.error('❌ Error en solicitud a Reddit:', error.message);
         if (error.response?.status === 401) {
-            console.log('🔄 Token expirado, obteniendo nuevo token...');
+            console.log('🔄 Token expirado, obteniendo nuevo...');
             await getRedditAccessToken();
-            return makeAuthenticatedRedditRequest(url, method, data);
+            return makeRedditRequest(url);
         }
         throw error;
     }
 }
 
 /**
- * Genera coordenadas aleatorias alrededor de una ciudad
+ * Obtiene posts populares de tecnología con mínimo de comentarios
  */
-const generateRandomCoords = (baseCoords) => {
-    const [lon, lat] = baseCoords;
-    const latOffset = (Math.random() - 0.5) * 0.2;
-    const lonOffset = (Math.random() - 0.5) * 0.2;
-    return [parseFloat((lon + lonOffset).toFixed(6)), parseFloat((lat + latOffset).toFixed(6))];
-};
-
-/**
- * Genera entity ID SHA-256 de 24 caracteres
- */
-const generateEntityId = (reference) => {
-    return crypto.createHash('sha256')
-        .update(reference)
-        .digest('hex')
-        .substring(0, 24);
-};
-
-/**
- * Genera author SHA-256 de 64 caracteres basado en el nombre
- */
-const generateAuthorHash = (name) => {
-    return crypto.createHash('sha256')
-        .update(name)
-        .digest('hex');
-};
-
-/**
- * Genera un nombre válido (solo letras y números, 3-15 caracteres)
- */
-const generateValidName = (redditUsername) => {
-    const cleanName = redditUsername.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-    let validName = cleanName.substring(0, 15);
-    if (validName.length < 3) {
-        validName = 'rdt' + Math.random().toString(36).substring(2, 5);
-    }
-    let counter = 0;
-    while (true) {
-        const suffix = counter === 0 ? '' : counter.toString();
-        const maxBaseLength = 15 - suffix.length;
-        const base = validName.substring(0, maxBaseLength);
-        const finalName = base + suffix;
-        if (finalName.length < 3) {
-            // Rare case, regenerate with random
-            validName = 'rdt' + Math.random().toString(36).substring(2, 12);
-            counter = 0;
-            continue;
-        }
-        if (!usedValidNames.has(finalName)) {
-            usedValidNames.add(finalName);
-            return finalName;
-        }
-        counter++;
-        if (counter > 100) {
-            console.error(`⚠️ Too many attempts to generate unique name for ${redditUsername}`);
-            throw new Error('Name generation failed');
-        }
-    }
-};
-
-/**
- * Decodifica entidades HTML (como &amp; a &)
- */
-const decodeHtmlEntities = (str) => {
-    if (!str) return str;
-    return str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-};
-
-/**
- * Extrae descripción e imagen de una página web
- */
-async function scrapeWebpage(url) {
+async function fetchTechPostsWithComments() {
     try {
-        console.log(`🌐 Scrapeando página web: ${url}`);
-        const response = await axios.get(url, {
-            headers: { 'User-Agent': 'Quelora-Seeder/2.4' },
-            timeout: TIMEOUT_MS
-        });
-        const $ = cheerio.load(response.data);
-
-        // Extraer descripción (meta description o og:description)
-        let description = $('meta[name="description"]').attr('content') || $('meta[property="og:description"]').attr('content') || '';
-        description = decodeHtmlEntities(description);
-
-        // Extraer imagen (og:image o primera imagen del artículo)
-        let image = $('meta[property="og:image"]').attr('content') || $('article img').first().attr('src') || null;
-        image = decodeHtmlEntities(image);
-
-        // Asegurar que la imagen sea una URL absoluta
-        if (image && !image.startsWith('http')) {
-            const urlObj = new URL(url);
-            image = new URL(image, urlObj.origin).href;
-        }
-
-        console.log(`📝 Descripción extraída: ${description ? description.substring(0, 50) + '...' : 'Ninguna'}`);
-        console.log(`🖼️ Imagen extraída: ${image || 'Ninguna'}`);
-        return { description, image };
-    } catch (error) {
-        console.error(`❌ Error scrapeando ${url}:`, error.message);
-        return { description: '', image: null };
-    }
-}
-
-/**
- * Obtiene datos iniciales del hilo de Reddit
- */
-async function fetchRedditData(threadUrl, limit = 1000) {
-    try {
-        const threadMatch = threadUrl.match(/comments\/([a-z0-9]+)/i);
-        if (!threadMatch) throw new Error('URL de Reddit inválida');
+        console.log(`📡 Buscando posts de tecnología con ≥ ${MIN_COMMENTS} comentarios...`);
         
-        const threadId = threadMatch[1];
-        const subreddit = threadUrl.split('/r/')[1].split('/')[0];
+        let allPosts = [];
         
-        const apiUrl = `https://oauth.reddit.com/r/${subreddit}/comments/${threadId}.json?limit=${limit}&threaded=true&sort=top`;
-        
-        console.log(`📡 Obteniendo datos iniciales de: ${apiUrl}`);
-        const response = await makeAuthenticatedRedditRequest(apiUrl);
-
-        const [postData, commentsData] = response;
-        const post = postData.data.children[0].data;
-        const comments = commentsData.data.children;
-
-        console.log(`📦 Total de elementos de primer nivel obtenidos: ${comments.length}`);
-
-        const moreComments = comments
-            .filter(c => c.kind === 'more')
-            .flatMap(more => more.data.children);
-
-        const validComments = comments.filter(c => c.kind === 't1');
-
-        console.log(`✅ Comentarios válidos iniciales: ${validComments.length}`);
-        console.log(`⏩ "More" comments de nivel superior encontrados: ${moreComments.length}`);
-
-        // Determinar la URL de la imagen desde Reddit
-        let imageUrl = null;
-        if (post.preview && post.preview.images && post.preview.images.length > 0) {
-            imageUrl = decodeHtmlEntities(post.preview.images[0].source.url);
-        } else if (post.url && (post.url.endsWith('.jpg') || post.url.endsWith('.png') || post.url.endsWith('.gif'))) {
-            imageUrl = decodeHtmlEntities(post.url);
-        } else if (post.url_overridden_by_dest && (post.url_overridden_by_dest.endsWith('.jpg') || post.url_overridden_by_dest.endsWith('.png') || post.url_overridden_by_dest.endsWith('.gif'))) {
-            imageUrl = decodeHtmlEntities(post.url_overridden_by_dest);
-        }
-
-        // Obtener descripción e imagen desde la página web si es un link post
-        let description = post.selftext || '';
-        let scrapedImage = imageUrl;
-        if (!description && post.url && !post.is_self && post.url.startsWith('http')) {
-            const scrapedData = await scrapeWebpage(post.url);
-            description = scrapedData.description || '';
-            if (!imageUrl) {
-                scrapedImage = scrapedData.image || null;
-            }
-        }
-
-        console.log(`📝 Descripción final: ${description ? description.substring(0, 50) + '...' : 'Ninguna'}`);
-        console.log(`🖼️ Imagen final: ${scrapedImage || 'Ninguna'}`);
-
-        return {
-            post: {
-                title: post.title,
-                content: post.selftext || '',
-                upvotes: post.ups,
-                comments: post.num_comments,
-                created: post.created_utc,
-                author: post.author,
-                url: `https://reddit.com${post.permalink}`,
-                image: scrapedImage,
-                description: description
-            },
-            comments: validComments,
-            moreComments: moreComments
-        };
-    } catch (error) {
-        console.error('❌ Error obteniendo datos de Reddit:', error.message);
-        throw error;
-    }
-}
-
-/**
- * Obtiene comentarios adicionales usando la API morechildren
- */
-async function fetchMoreComments(threadId, childrenIds) {
-    try {
-        console.log(`📡 Obteniendo lote de ${childrenIds.length} comentarios adicionales...`);
-        console.log(`IDs (primeros 5): ${childrenIds.slice(0, 5).join(', ')}...`);
-        const apiUrl = `https://oauth.reddit.com/api/morechildren`;
-        const data = new URLSearchParams({
-            api_type: 'json',
-            children: childrenIds.join(','),
-            link_id: `t3_${threadId}`,
-            sort: 'top',
-        });
-        
-        const response = await makeAuthenticatedRedditRequest(apiUrl, 'post', data);
-        const comments = response.json?.data?.things || [];
-        console.log(`📦 Lote obtenido: ${comments.length} comentarios.`);
-        return comments;
-    } catch (error) {
-        console.error('❌ Error obteniendo "more" comments:', error.message, error.response?.data);
-        return [];
-    }
-}
-
-/**
- * Crea o obtiene un perfil para un autor de Reddit
- */
-async function getOrCreateProfile(redditAuthor) {
-    console.log(`⏳ Buscando/Creando perfil para ${redditAuthor}...`);
-    let validName;
-    if (authorToNameMap.has(redditAuthor)) {
-        validName = authorToNameMap.get(redditAuthor);
-        console.log(`🔍 Usando nombre mapeado: ${validName}`);
-        const existingProfile = await Profile.findOne({ name: validName }).maxTimeMS(TIMEOUT_MS);
-        if (existingProfile) {
-            console.log(`✅ Perfil existente encontrado: ${validName}`);
-            return existingProfile;
-        }
-        console.warn(`⚠️ Perfil no encontrado con nombre mapeado, procediendo a crear nuevo.`);
-    }
-
-    validName = generateValidName(redditAuthor);
-    console.log(`🔍 Buscando perfil con nombre generado: ${validName}`);
-    const existingProfile = await Profile.findOne({ name: validName }).maxTimeMS(TIMEOUT_MS);
-    if (existingProfile) {
-        console.log(`✅ Perfil existente: ${validName}`);
-        authorToNameMap.set(redditAuthor, validName);
-        uniqueAuthors.add(redditAuthor);
-        return existingProfile;
-    }
-
-    uniqueAuthors.add(redditAuthor);
-    authorToNameMap.set(redditAuthor, validName);
-    const authorHash = generateAuthorHash(validName);
-    const city = CITIES[Math.floor(Math.random() * CITIES.length)];
-    const coordinates = generateRandomCoords(city.coords);
-
-    const profileData = {
-        cid: process.env.CID || 'QU-ME7HF2BN-E8QD9',
-        author: authorHash,
-        name: validName,
-        given_name: redditAuthor,
-        family_name: 'Reddit',
-        locale: 'en',
-        email: `${validName}@reddit.quelora.com`,
-        picture: `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70) + 1}`,
-        bookmarksCount: 0,
-        commentsCount: 0,
-        followersCount: 0,
-        followingCount: 0,
-        blockedCount: 0,
-        likesCount: 0,
-        sharesCount: 0,
-        location: {
-            type: 'Point',
-            coordinates: coordinates,
-            city: city.name,
-            countryCode: 'US',
-            regionCode: 'CA',
-            lastUpdated: new Date(),
-            source: 'geocoding'
-        },
-        geohash: null,
-        settings: {
-            notifications: { web: false, email: false, push: false, newFollowers: false, postLikes: false, comments: false, newPost: false },
-            privacy: { followerApproval: false, showActivity: 'everyone' },
-            interface: { defaultLanguage: 'en', defaultTheme: 'system' },
-            session: { rememberSession: true }
-        },
-        created_at: new Date(),
-        updated_at: new Date()
-    };
-
-    try {
-        const profile = new Profile(profileData);
-        await profile.save();
-        console.log(`✅ Perfil creado: ${validName}`);
-        return profile;
-    } catch (error) {
-        console.error(`❌ Error creando perfil para ${redditAuthor}:`, error.message);
-        return null;
-    }
-}
-
-/**
- * Crea o encuentra el post y actualiza los "moreCommentsRef"
- */
-async function createOrFindPost(redditData, entityId, moreComments) {
-    let post = await Post.findOne({ entity: entityId }).maxTimeMS(TIMEOUT_MS);
-    if (post) {
-        console.log(`✅ Post existente encontrado: ${post._id}`);
-        if (post.moreCommentsRef.length === 0 && moreComments.length > 0) {
-            post.moreCommentsRef = moreComments;
-            await post.save();
-            console.log(`✍️ Post actualizado con ${moreComments.length} "more" comment refs.`);
-        }
-        return post;
-    }
-
-    const postData = {
-        cid: process.env.CID || 'QU-ME7HF2BN-E8QD9',
-        entity: entityId,
-        reference: redditData.post.url,
-        title: redditData.post.title.substring(0, 100),
-        description: redditData.post.description || '', // Use scraped or Reddit description
-        type: 'reddit_crosspost',
-        link: redditData.post.url,
-        image: redditData.post.image || null, // Use scraped or Reddit image
-        likesCount: redditData.post.upvotes || 0,
-        commentCount: redditData.post.comments || 0,
-        viewsCount: Math.floor((redditData.post.upvotes || 0) * 15),
-        created_at: new Date(redditData.post.created * 1000),
-        updated_at: new Date(redditData.post.created * 1000),
-        moreCommentsRef: moreComments
-    };
-
-    try {
-        post = new Post(postData);
-        await post.save();
-        console.log(`✅ Post creado: ${post._id}`);
-        return post;
-    } catch (error) {
-        console.error(`❌ Error creando post:`, error.message);
-        throw error;
-    }
-}
-
-/**
- * Función recursiva para procesar y crear comentarios y sus réplicas.
- */
-async function processCommentsRecursively(commentsData, postId, entityId, parentId = null) {
-    console.log(`⏳ Iniciando procesamiento recursivo de ${commentsData.length} items (parent: ${parentId || 'top-level'}).`);
-    let createdCommentsCount = 0;
-    const newMoreCommentIds = [];
-
-    for (const item of commentsData) {
-        console.log(`📄 Procesando item kind: ${item.kind}, id: ${item.data.id || item.data.name || 'N/A'}`);
-        if (item.kind === 't1' && item.data.author && item.data.body && item.data.body !== '[deleted]' && item.data.body !== '[removed]') {
-            const commentData = item.data;
-            console.log(`👤 Autor: ${commentData.author}, body length: ${commentData.body.length}`);
-
-            const existingComment = await Comment.findOne({ reference: commentData.name }).select('_id').lean();
-            if (existingComment) {
-                console.log(`⏩ Comentario ya existe, saltando: ${commentData.name}`);
+        // Buscar en cada subreddit de tecnología
+        for (const subreddit of TECH_SUBREDDITS) {
+            try {
+                console.log(`🔍 Escaneando r/${subreddit}...`);
+                const url = `https://oauth.reddit.com/r/${subreddit}/top?t=day&limit=20`;
+                const data = await makeRedditRequest(url);
+                
+                const posts = data.data.children
+                    .filter(post => post.data.num_comments >= MIN_COMMENTS) // Filtro por comentarios
+                    .filter(post => !post.data.over_18) // Excluir NSFW
+                    .map(post => ({
+                        id: post.data.id,
+                        title: post.data.title,
+                        subreddit: post.data.subreddit,
+                        author: post.data.author,
+                        upvotes: post.data.ups,
+                        comments: post.data.num_comments,
+                        created: post.data.created_utc,
+                        url: `https://reddit.com${post.data.permalink}`,
+                        image: getPostImage(post.data),
+                        video: getPostVideo(post.data),
+                        gallery: getPostGallery(post.data),
+                        media: getPostMedia(post.data),
+                        description: post.data.selftext || '',
+                        nsfw: post.data.over_18
+                    }));
+                
+                console.log(`✅ r/${subreddit}: ${posts.length} posts con ≥ ${MIN_COMMENTS} comentarios`);
+                allPosts = allPosts.concat(posts);
+                
+                // Pequeña pausa entre requests
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+            } catch (error) {
+                console.error(`❌ Error en r/${subreddit}:`, error.message);
                 continue;
             }
-
-            try {
-                const profile = await getOrCreateProfile(commentData.author);
-                if (!profile) {
-                    console.warn(`⚠️ No se pudo crear el perfil para ${commentData.author}, saltando comentario.`);
-                    continue;
-                }
-                
-                const newComment = new Comment({
-                    post: postId,
-                    entity: entityId,
-                    parent: parentId,
-                    profile_id: profile._id,
-                    author: profile.author,
-                    reference: commentData.name,
-                    text: commentData.body,
-                    language: 'en',
-                    likesCount: commentData.ups || 0,
-                    repliesCount: 0, // Initialize to 0, will be updated if replies exist
-                    created_at: new Date(commentData.created_utc * 1000),
-                    updated_at: new Date(commentData.created_utc * 1000)
-                });
-
-                await newComment.save();
-                createdCommentsCount++;
-                console.log(`✅ Comentario creado (Nivel ${parentId ? 'Réplica' : 'Superior'}): ${commentData.author} - "${commentData.body.substring(0, 30)}..." (ID: ${newComment._id})`);
-
-                // Increment repliesCount for the parent comment if this is a reply
-                if (parentId) {
-                    await Comment.findByIdAndUpdate(parentId, {
-                        $inc: { repliesCount: 1 },
-                        updated_at: new Date()
-                    });
-                    console.log(`📈 Incrementado repliesCount para comentario padre ${parentId}`);
-                }
-                
-                if (commentData.replies && commentData.replies.kind === 'Listing' && commentData.replies.data.children.length > 0) {
-                    console.log(`🔄 Recursando en ${commentData.replies.data.children.length} réplicas...`);
-                    const { count, moreIds } = await processCommentsRecursively(
-                        commentData.replies.data.children,
-                        postId,
-                        entityId,
-                        newComment._id
-                    );
-                    createdCommentsCount += count;
-                    newMoreCommentIds.push(...moreIds);
-                }
-            } catch (error) {
-                console.error(`❌ Error creando comentario de ${commentData.author}:`, error.message);
-            }
         }
-        else if (item.kind === 'more' && item.data.children) {
-            console.log(`⏩ Encontrado 'more' con ${item.data.children.length} children IDs.`);
-            newMoreCommentIds.push(...item.data.children);
-        } else {
-            console.warn(`⚠️ Item desconocido o inválido: kind ${item.kind}`);
-        }
+        
+        // Eliminar duplicados por URL y ordenar por comentarios (descendente)
+        const uniquePosts = allPosts.filter((post, index, self) => 
+            index === self.findIndex(p => p.url === post.url)
+        ).sort((a, b) => b.comments - a.comments);
+        
+        console.log(`🎯 Total posts únicos encontrados: ${uniquePosts.length} (≥ ${MIN_COMMENTS} comentarios)`);
+        return uniquePosts.slice(0, POST_LIMIT); // Limitar resultado
+        
+    } catch (error) {
+        console.error('❌ Error obteniendo posts de tecnología:', error.message);
+        throw error;
     }
-    console.log(`🏁 Finalizado procesamiento recursivo: ${createdCommentsCount} creados, ${newMoreCommentIds.length} more IDs recolectados.`);
-    return { count: createdCommentsCount, moreIds: newMoreCommentIds };
 }
 
 /**
- * Función principal que orquesta todo el proceso
+ * Extrae imagen del post si existe
  */
-async function seedRedditThread() {
+function getPostImage(postData) {
+    // Imagen desde preview
+    if (postData.preview && postData.preview.images && postData.preview.images.length > 0) {
+        return postData.preview.images[0].source.url.replace(/&amp;/g, '&');
+    }
+    
+    // Imagen directa desde URL
+    if (postData.url && (
+        postData.url.endsWith('.jpg') || 
+        postData.url.endsWith('.jpeg') ||
+        postData.url.endsWith('.png') ||
+        postData.url.endsWith('.gif') ||
+        postData.url.includes('imgur.com') ||
+        postData.url.includes('i.redd.it')
+    )) {
+        return postData.url;
+    }
+    
+    // Thumbnail
+    if (postData.thumbnail && postData.thumbnail.startsWith('http')) {
+        return postData.thumbnail;
+    }
+    
+    return null;
+}
+
+/**
+ * Extrae video del post si existe
+ */
+function getPostVideo(postData) {
+    if (postData.media && postData.media.reddit_video) {
+        return postData.media.reddit_video.fallback_url;
+    }
+    
+    if (postData.url && (
+        postData.url.includes('youtube.com') ||
+        postData.url.includes('youtu.be') ||
+        postData.url.includes('vimeo.com') ||
+        postData.url.includes('twitch.tv') ||
+        postData.url.endsWith('.mp4') ||
+        postData.url.endsWith('.webm') ||
+        postData.url.includes('gfycat.com') ||
+        postData.url.includes('redgifs.com')
+    )) {
+        return postData.url;
+    }
+    
+    return null;
+}
+
+/**
+ * Extrae galería de imágenes si existe
+ */
+function getPostGallery(postData) {
+    if (postData.is_gallery && postData.media_metadata) {
+        const galleryImages = [];
+        for (const [key, item] of Object.entries(postData.media_metadata)) {
+            if (item.s && item.s.u) {
+                galleryImages.push(item.s.u.replace(/&amp;/g, '&'));
+            }
+        }
+        return galleryImages.length > 0 ? galleryImages : null;
+    }
+    return null;
+}
+
+/**
+ * Extrae cualquier tipo de medio disponible
+ */
+function getPostMedia(postData) {
+    return {
+        image: getPostImage(postData),
+        video: getPostVideo(postData),
+        gallery: getPostGallery(postData)
+    };
+}
+
+/**
+ * Verifica si el post tiene al menos un elemento multimedia
+ */
+function hasMediaContent(postData) {
+    return !!(postData.image || postData.video || postData.gallery);
+}
+
+/**
+ * Obtiene la URL principal del medio para el post
+ */
+function getPrimaryMediaUrl(postData) {
+    if (postData.video) return postData.video;
+    if (postData.image) return postData.image;
+    if (postData.gallery && postData.gallery.length > 0) return postData.gallery[0];
+    return null;
+}
+
+/**
+ * Genera entity ID único basado en URL de Reddit
+ */
+function generateEntityId(redditUrl) {
+    return require('crypto').createHash('sha256')
+        .update(redditUrl)
+        .digest('hex')
+        .substring(0, 24);
+}
+
+/**
+ * Verifica si el post ya existe en la base de datos
+ */
+async function postExists(entityId) {
+    const existing = await Post.findOne({ entity: entityId });
+    return !!existing;
+}
+
+/**
+ * Importa un post a la base de datos SOLO si tiene contenido multimedia
+ */
+async function importPost(postData) {
+    // Verificar que el post tenga al menos un elemento multimedia
+    if (!hasMediaContent(postData)) {
+        console.log(`❌ Post sin multimedia - SKIPPED: r/${postData.subreddit} - ${postData.title.substring(0, 60)}...`);
+        return { skipped: true, reason: 'no_media' };
+    }
+    
+    const entityId = generateEntityId(postData.url);
+    
+    if (await postExists(entityId)) {
+        console.log(`⏩ Post ya existe: r/${postData.subreddit} - ${postData.title.substring(0, 60)}...`);
+        return { skipped: true, reason: 'exists' };
+    }
+    
     try {
-        if (!REDDIT_THREAD_URL) throw new Error('❌ REDDIT_URL no definido');
-        if (!REDDIT_CLIENT_ID || !REDDIT_CLIENT_SECRET) throw new Error('❌ Credenciales de Reddit no configuradas');
-
-        await connectDB();
-        console.log('✅ Conexión a DB establecida');
-        await getRedditAccessToken();
-
-        const entityId = generateEntityId(REDDIT_THREAD_URL);
-        const threadId = REDDIT_THREAD_URL.match(/comments\/([a-z0-9]+)/i)[1];
-
-        let post = await Post.findOne({ entity: entityId });
-
-        if (!post) {
-            console.log("⏳ Post no encontrado. Realizando importación inicial...");
-            const redditData = await fetchRedditData(REDDIT_THREAD_URL, REDDIT_LIMIT);
-            post = await createOrFindPost(redditData, entityId, redditData.moreComments);
-
-            console.log(`⏳ Creando comentarios iniciales y sus réplicas...`);
-            const { count, moreIds } = await processCommentsRecursively(redditData.comments, post._id, entityId);
-
-            if (moreIds.length > 0) {
-                post.moreCommentsRef.push(...moreIds);
-                await Post.findByIdAndUpdate(post._id, { $addToSet: { moreCommentsRef: { $each: moreIds } } });
+        const primaryMedia = getPrimaryMediaUrl(postData);
+        
+        const post = new Post({
+            cid: process.env.CID || 'QU-ME7HF2BN-E8QD9',
+            entity: entityId,
+            reference: postData.url,
+            title: postData.title.substring(0, 100),
+            description: postData.description.substring(0, 200) || '',
+            type: 'reddit_tech',
+            link: postData.url,
+            image: primaryMedia, // Usar el medio principal
+            media: postData.media, // Guardar todos los medios disponibles
+            likesCount: postData.upvotes,
+            commentCount: postData.comments,
+            viewsCount: 0, // Sin simulación
+            created_at: new Date(postData.created * 1000),
+            updated_at: new Date(postData.created * 1000),
+            metadata: {
+                subreddit: postData.subreddit,
+                author: postData.author,
+                nsfw: postData.nsfw,
+                original_comments: postData.comments,
+                imported_comments: false,
+                has_image: !!postData.image,
+                has_video: !!postData.video,
+                has_gallery: !!postData.gallery,
+                media_count: postData.gallery ? postData.gallery.length : 0
             }
-            console.log(`✅ ${count} comentarios iniciales creados.`);
-        } else {
-            console.log("✅ Post encontrado. Buscando comentarios pendientes para reanudar...");
-        }
-
-        let originalMoreLength = post.moreCommentsRef.length;
-        post.moreCommentsRef = [...new Set(post.moreCommentsRef)];
-        if (post.moreCommentsRef.length < originalMoreLength) {
-            console.log(`⚠️ Eliminados ${originalMoreLength - post.moreCommentsRef.length} duplicados en moreCommentsRef.`);
-            await post.save();
-        }
-        console.log(`📊 moreCommentsRef inicial después de dedup: ${post.moreCommentsRef.length}`);
-
-        while (post.moreCommentsRef.length > 0) {
-            const idsToFetch = post.moreCommentsRef.slice(0, MORE_COMMENTS_BATCH_SIZE);
-            console.log(`\n⏳ Procesando lote de ${idsToFetch.length} "more" comment IDs...`);
-
-            const newCommentsData = await fetchMoreComments(threadId, idsToFetch);
-            
-            if (newCommentsData.length > 0) {
-                const { count, moreIds } = await processCommentsRecursively(newCommentsData, post._id, entityId);
-                console.log(`✅ ${count} comentarios adicionales creados desde el lote. ${moreIds.length} nuevos more IDs encontrados.`);
-
-                let updatedMoreRefs = post.moreCommentsRef.slice(idsToFetch.length);
-                updatedMoreRefs.push(...moreIds);
-                updatedMoreRefs = [...new Set(updatedMoreRefs)];
-                
-                await Post.findByIdAndUpdate(post._id, { 
-                    $set: { moreCommentsRef: updatedMoreRefs }
-                });
-                post.moreCommentsRef = updatedMoreRefs;
-
-            } else {
-                console.log("⚠️ No se recibieron comentarios del lote, eliminando IDs procesados.");
-                await Post.findByIdAndUpdate(post._id, { $pullAll: { moreCommentsRef: idsToFetch } });
-                post.moreCommentsRef = post.moreCommentsRef.slice(idsToFetch.length);
-            }
-            console.log(`📊 moreCommentsRef restantes: ${post.moreCommentsRef.length}`);
-            
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-
-        console.log('⏳ Actualizando conteo final de comentarios en el post...');
-        const finalCommentCount = await Comment.countDocuments({ post: post._id });
-        await Post.findByIdAndUpdate(post._id, {
-            commentCount: finalCommentCount,
-            updated_at: new Date()
         });
-
-        console.log('🎉 Hilo de Reddit importado/actualizado exitosamente!');
-        console.log(`   - Post: ${post._id}`);
-        console.log(`   - Total comentarios en DB: ${finalCommentCount}`);
-        console.log(`   - Perfiles únicos creados/usados: ${uniqueAuthors.size}`);
-
-    } catch (err) {
-        console.error('❌ Error fatal en el seed:', err.message, err.stack);
-        process.exitCode = 1;
-    } finally {
-        console.log('⏳ Cerrando conexión a la base de datos...');
-        await mongoose.connection.close();
-        console.log('✅ Conexión cerrada. Finalizando script.');
-        process.exit(process.exitCode || 0);
+        
+        await post.save();
+        console.log(`✅ Post importado: r/${postData.subreddit} (${postData.comments} comentarios, ${getMediaType(postData)}) - ${postData.title.substring(0, 50)}...`);
+        return { success: true, post };
+    } catch (error) {
+        console.error(`❌ Error importando post:`, error.message);
+        return { error: true };
     }
 }
 
-console.log('🚀 Iniciando seedRedditThread (versión 2.4)...');
-seedRedditThread();
+/**
+ * Obtiene el tipo de medio para logging
+ */
+function getMediaType(postData) {
+    if (postData.video) return 'video';
+    if (postData.gallery) return `gallery(${postData.gallery.length} images)`;
+    if (postData.image) return 'image';
+    return 'no media';
+}
+
+/**
+ * Función principal
+ */
+async function importTechPostsWithComments() {
+    try {
+        if (!REDDIT_CLIENT_ID || !REDDIT_CLIENT_SECRET) {
+            throw new Error('❌ Credenciales de Reddit no configuradas en .env');
+        }
+        
+        await connectDB();
+        console.log('✅ Conectado a la base de datos');
+        
+        const techPosts = await fetchTechPostsWithComments();
+        
+        console.log(`\n📥 Filtrando posts con contenido multimedia...`);
+        
+        // Filtrar posts que tienen contenido multimedia
+        const postsWithMedia = techPosts.filter(hasMediaContent);
+        
+        console.log(`📊 Estadísticas de contenido multimedia:`);
+        console.log(`   📈 Total posts encontrados: ${techPosts.length}`);
+        console.log(`   🖼️  Posts con multimedia: ${postsWithMedia.length}`);
+        console.log(`   📝 Posts sin multimedia: ${techPosts.length - postsWithMedia.length}`);
+        
+        console.log(`\n📥 Importando ${postsWithMedia.length} posts con contenido multimedia...`);
+        let imported = 0;
+        let skipped = 0;
+        let noMediaSkipped = 0;
+        let errors = 0;
+        
+        for (const post of techPosts) {
+            const result = await importPost(post);
+            
+            if (result.skipped) {
+                if (result.reason === 'no_media') {
+                    noMediaSkipped++;
+                } else {
+                    skipped++;
+                }
+            } else if (result.success) {
+                imported++;
+            } else {
+                errors++;
+            }
+            
+            // Pausa para no saturar la API
+            await new Promise(resolve => setTimeout(resolve, 200));
+        }
+        
+        console.log(`\n🎉 Importación completada:`);
+        console.log(`   ✅ Nuevos posts con multimedia: ${imported}`);
+        console.log(`   ⏩ Ya existían: ${skipped}`);
+        console.log(`   🚫 Sin multimedia (omitidos): ${noMediaSkipped}`);
+        console.log(`   ❌ Errores: ${errors}`);
+        console.log(`   📊 Total analizados: ${techPosts.length}`);
+        console.log(`   💬 Filtro: ≥ ${MIN_COMMENTS} comentarios + multimedia obligatorio`);
+        console.log(`   🔧 Subreddits monitoreados: ${TECH_SUBREDDITS.length}`);
+        
+    } catch (error) {
+        console.error('❌ Error en importación:', error.message);
+    } finally {
+        await mongoose.connection.close();
+        console.log('✅ Conexión cerrada');
+    }
+}
+
+// Ejecutar si es llamado directamente
+if (require.main === module) {
+    console.log('🚀 Iniciando importación de posts de tecnología con comentarios Y multimedia...');
+    importTechPostsWithComments();
+}
+
+module.exports = { importTechPostsWithComments };

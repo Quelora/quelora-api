@@ -398,6 +398,10 @@ const postSchema = new mongoose.Schema({
     type: [String],
     default: []
   },
+  metadata: {
+    type: mongoose.Schema.Types.Mixed,
+    default: {},
+  },
   deletion: {
     status: {
       type: String,
