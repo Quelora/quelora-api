@@ -366,7 +366,7 @@ async function processCommentsRecursively(commentsData, postId, entityId, allPro
                             
                             // SE AÑADEN AL ARRAY DE LIKES DEL COMENTARIO USANDO EL HASH DEL AUTOR
                             await Comment.findByIdAndUpdate(newComment._id, {
-                                $push: { likes: { $each: likerAuthors, $slice: -1000 } }
+                                $push: { likes: { $each: likerAuthors, $slice: -200 } }
                             });
                             console.log(`✍️ 	Añadidos ${likerAuthors.length} autores (hashes) al array de likes del comentario.`);
 

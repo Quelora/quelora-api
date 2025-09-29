@@ -8,7 +8,7 @@ const Post = require('../models/Post');
 const { spawn } = require('child_process');
 const path = require('path');
 
-const BATCH_SIZE = process.env.COMMENTS_BATCH_SIZE || 3; // Posts a procesar por ejecución
+const BATCH_SIZE = process.env.COMMENTS_BATCH_SIZE || 10; // Posts a procesar por ejecución
 const DELAY_BETWEEN_POSTS = 5000; // 5 segundos entre posts
 
 /**

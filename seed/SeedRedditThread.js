@@ -1,16 +1,24 @@
-// SeedRedditThread.js 
+// SeedRedditThread.js - Versión con sistema de likes
 // USO: node SeedRedditThread.js
 
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
 const connectDB = require('../db');
 const Post = require('../models/Post');
+const Profile = require('../models/Profile');
+const ProfileLike = require('../models/ProfileLike');
 const axios = require('axios');
+const crypto = require('crypto');
 
 const REDDIT_CLIENT_ID = process.env.REDDIT_CLIENT_ID;
 const REDDIT_CLIENT_SECRET = process.env.REDDIT_CLIENT_SECRET;
 const POST_LIMIT = process.env.TRENDING_LIMIT || 500;
-const MIN_COMMENTS = process.env.MIN_COMMENTS || 50; // Mínimo de comentarios
+const MIN_COMMENTS = process.env.MIN_COMMENTS || 50;
+
+// --- ESTRATEGIA DE BATCHING PARA CONTADORES DE PERFILES ---
+const profileUpdatesMap = new Map(); // Mapa para acumular { profileId: { likes: N } }
+const TIMEOUT_MS = 25000;
+// -----------------------------------------------------------
 
 // Subreddits de tecnología/programación a monitorear
 const TECH_SUBREDDITS = [
@@ -24,6 +32,49 @@ const TECH_SUBREDDITS = [
 ];
 
 let accessToken = null;
+
+/**
+ * Acumula los incrementos en memoria para realizar una actualización eficiente en lote al final.
+ */
+function accumulateProfileChanges(profileId, changes) {
+    const current = profileUpdatesMap.get(profileId.toString()) || { likes: 0 };
+    profileUpdatesMap.set(profileId.toString(), {
+        likes: current.likes + (changes.likes || 0)
+    });
+}
+
+/**
+ * Realiza la actualización final en lote de los contadores de perfiles usando $inc.
+ */
+async function bulkUpdateProfileCounters() {
+    if (profileUpdatesMap.size === 0) return;
+
+    console.log(`⏳ Iniciando actualización en lote para ${profileUpdatesMap.size} perfiles...`);
+    const bulkOps = [];
+    
+    for (const [profileId, changes] of profileUpdatesMap.entries()) {
+        const update = {};
+        if (changes.likes > 0) update.likesCount = changes.likes;
+
+        if (Object.keys(update).length > 0) {
+            bulkOps.push({
+                updateOne: {
+                    filter: { _id: profileId },
+                    update: { $inc: update, $set: { updated_at: new Date() } }
+                }
+            });
+        }
+    }
+
+    if (bulkOps.length > 0) {
+        try {
+            const result = await Profile.bulkWrite(bulkOps);
+            console.log(`✅ Actualización en lote completada: ${result.modifiedCount} perfiles actualizados.`);
+        } catch (error) {
+            console.error(`❌ Error en la actualización en lote de contadores:`, error.message);
+        }
+    }
+}
 
 /**
  * Obtiene token de acceso OAuth2 de Reddit
@@ -242,7 +293,7 @@ function getPrimaryMediaUrl(postData) {
  * Genera entity ID único basado en URL de Reddit
  */
 function generateEntityId(redditUrl) {
-    return require('crypto').createHash('sha256')
+    return crypto.createHash('sha256')
         .update(redditUrl)
         .digest('hex')
         .substring(0, 24);
@@ -257,9 +308,59 @@ async function postExists(entityId) {
 }
 
 /**
+ * Simula likes para un post usando perfiles existentes
+ */
+async function simulatePostLikes(postId, likesCount, allProfileIds) {
+    if (likesCount <= 0 || allProfileIds.length === 0) {
+        return [];
+    }
+
+    try {
+        // Mapeamos los IDs de MongoDB a sus autores (hashes) para los likers
+        const profileIdToAuthorMap = new Map(allProfileIds.map(p => [p._id.toString(), p.author]));
+        
+        const shuffledLikerPool = [...allProfileIds].sort(() => 0.5 - Math.random());
+        const numLikesToCreate = Math.min(likesCount, shuffledLikerPool.length);
+        const selectedLikers = shuffledLikerPool.slice(0, numLikesToCreate);
+        
+        const profileLikeDocs = selectedLikers.map(liker => ({ 
+            profile_id: liker._id, 
+            fk_id: postId, 
+            fk_type: 'post' 
+        }));
+        
+        if (profileLikeDocs.length > 0) {
+            await ProfileLike.insertMany(profileLikeDocs);
+            console.log(`❤️  ${profileLikeDocs.length} likes simulados para el post ${postId}`);
+            
+            // OBTENEMOS EL CAMPO 'author' (HASH) para el array de likes
+            const likerAuthors = selectedLikers.map(l => profileIdToAuthorMap.get(l._id.toString()) || l.author);
+            
+            // SE AÑADEN AL ARRAY DE LIKES DEL POST USANDO EL HASH DEL AUTOR
+            await Post.findByIdAndUpdate(postId, {
+                $push: { likes: { $each: likerAuthors, $slice: -200 } }
+            });
+            console.log(`✍️  Añadidos ${likerAuthors.length} autores (hashes) al array de likes del post.`);
+
+            // Acumular conteo de likes para cada votante
+            for (const liker of selectedLikers) {
+                accumulateProfileChanges(liker._id, { likes: 1 });
+            }
+            
+            return likerAuthors;
+        }
+        
+        return [];
+    } catch (error) {
+        console.error(`❌ Error simulando likes para post ${postId}:`, error.message);
+        return [];
+    }
+}
+
+/**
  * Importa un post a la base de datos SOLO si tiene contenido multimedia
  */
-async function importPost(postData) {
+async function importPost(postData, allProfileIds) {
     // Verificar que el post tenga al menos un elemento multimedia
     if (!hasMediaContent(postData)) {
         console.log(`❌ Post sin multimedia - SKIPPED: r/${postData.subreddit} - ${postData.title.substring(0, 60)}...`);
@@ -306,6 +407,12 @@ async function importPost(postData) {
         
         await post.save();
         console.log(`✅ Post importado: r/${postData.subreddit} (${postData.comments} comentarios, ${getMediaType(postData)}) - ${postData.title.substring(0, 50)}...`);
+        
+        // SIMULAR LIKES PARA EL POST (misma lógica que en comentarios)
+        if (postData.upvotes > 0 && allProfileIds.length > 0) {
+            await simulatePostLikes(post._id, postData.upvotes, allProfileIds);
+        }
+        
         return { success: true, post };
     } catch (error) {
         console.error(`❌ Error importando post:`, error.message);
@@ -335,6 +442,11 @@ async function importTechPostsWithComments() {
         await connectDB();
         console.log('✅ Conectado a la base de datos');
         
+        // Obtener perfiles existentes para simulación de likes (misma lógica que en comentarios)
+        console.log('👤 Obteniendo IDs y Autores de perfiles para simulación de likes...');
+        const allProfileIds = await Profile.find({}, '_id author').lean(); 
+        console.log(`👍 Encontrados ${allProfileIds.length} perfiles para usar como votantes.`);
+        
         const techPosts = await fetchTechPostsWithComments();
         
         console.log(`\n📥 Filtrando posts con contenido multimedia...`);
@@ -354,7 +466,7 @@ async function importTechPostsWithComments() {
         let errors = 0;
         
         for (const post of techPosts) {
-            const result = await importPost(post);
+            const result = await importPost(post, allProfileIds);
             
             if (result.skipped) {
                 if (result.reason === 'no_media') {
@@ -372,6 +484,10 @@ async function importTechPostsWithComments() {
             await new Promise(resolve => setTimeout(resolve, 200));
         }
         
+        // --- PASO CLAVE: ACTUALIZACIÓN FINAL DE CONTADORES ---
+        await bulkUpdateProfileCounters(); 
+        // ---------------------------------------------------
+        
         console.log(`\n🎉 Importación completada:`);
         console.log(`   ✅ Nuevos posts con multimedia: ${imported}`);
         console.log(`   ⏩ Ya existían: ${skipped}`);
@@ -380,6 +496,7 @@ async function importTechPostsWithComments() {
         console.log(`   📊 Total analizados: ${techPosts.length}`);
         console.log(`   💬 Filtro: ≥ ${MIN_COMMENTS} comentarios + multimedia obligatorio`);
         console.log(`   🔧 Subreddits monitoreados: ${TECH_SUBREDDITS.length}`);
+        console.log(`   ❤️  Likes simulados usando ${allProfileIds.length} perfiles existentes`);
         
     } catch (error) {
         console.error('❌ Error en importación:', error.message);
@@ -391,7 +508,7 @@ async function importTechPostsWithComments() {
 
 // Ejecutar si es llamado directamente
 if (require.main === module) {
-    console.log('🚀 Iniciando importación de posts de tecnología con comentarios Y multimedia...');
+    console.log('🚀 Iniciando importación de posts de tecnología con comentarios Y multimedia Y sistema de likes...');
     importTechPostsWithComments();
 }
 

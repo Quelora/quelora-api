@@ -267,7 +267,7 @@ const getProfile = async (author, cid, options = {}) => {
     result.blocked = blocked;
   }
 
-  if (includeActivity && (isSessionUser || profile.settings?.privacy?.showActivity === 'public' || (profile.settings?.privacy?.showActivity === 'followers' && isFollowing))) {
+  if (includeActivity && (isSessionUser || profile.settings?.privacy?.showActivity === 'everyone' || (profile.settings?.privacy?.showActivity === 'followers' && isFollowing))) {
     const [likes, comments, shares] = await Promise.all([
       ProfileLike.find({ profile_id: profile._id }).lean(),
       Comment.find({ profile_id: profile._id, visible: true }).lean(),
