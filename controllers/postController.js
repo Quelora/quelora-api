@@ -498,6 +498,7 @@ exports.getPostStats = async (req, res, next) => {
           allow_replies: post.config?.interaction?.allow_replies ?? true,
           allow_view_comments: post.config?.interaction?.allow_view_comments ?? true,
           allow_bookmarks: post.config?.interaction?.allow_bookmarks ?? false,
+          allow_quotes: post.config?.interaction?.allow_quotes ?? true,
         },
         limits: {
           comment_text: post.config?.limits?.comment_text ?? 200,

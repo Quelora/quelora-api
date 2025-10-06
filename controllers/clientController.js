@@ -6,6 +6,7 @@ const Post = require('../models/Post');
 const Comment  = require('../models/Comment');
 const os = require('os');
 
+const formatComment = require('../utils/formatComment');
 const { decryptJSON, generateKeyFromString } = require('../utils/cipher');
 const deepMerge = require('../utils/deepMerge');
 

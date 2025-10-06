@@ -667,7 +667,10 @@ exports.reportComment = async (req, res, next) => {
 exports.translateComment = async (req, res, next) => {
   try {
     const { comment } = req.params;
-    const targetLanguage = req.user?.locale?.substring(0, 2) || 'es';
+    const author = req.user.author;
+    const cid = req.cid;
+    const profile = await profileService.getProfile(author, cid);
+    const targetLanguage = profile.locale || req.user?.locale?.substring(0, 2) || 'en';
 
     if (!mongoose.Types.ObjectId.isValid(comment)) {
       return res.status(400).json({ message: 'Invalid comment ID.' });

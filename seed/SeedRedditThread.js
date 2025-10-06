@@ -503,6 +503,7 @@ async function importTechPostsWithComments() {
     } finally {
         await mongoose.connection.close();
         console.log('✅ Conexión cerrada');
+        process.exit(0); 
     }
 }
 

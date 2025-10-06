@@ -325,7 +325,6 @@ const getProfile = async (author, cid, options = {}) => {
   return result;
 };
 
-
 // Process likes with MongoDB aggregation pipeline
 async function processLikes(items, cid) {
   const pipeline = [

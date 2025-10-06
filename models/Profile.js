@@ -353,68 +353,77 @@ profileSchema.pre('save', function (next) {
  * @throws {Error} If the key is invalid, value is invalid, or profile not found
  */
 profileSchema.statics.updateSettings = async function(cid, author, key, value) {
-  const validPaths = {
-    'notifications.web': 'boolean',
-    'notifications.email': 'boolean',
-    'notifications.push': 'boolean',
-    'notifications.newFollowers': 'boolean',
-    'notifications.postLikes': 'boolean',
-    'notifications.comments': 'boolean',
-    'notifications.newPost': 'boolean',
-    'privacy.followerApproval': 'boolean',
-    'privacy.showActivity': 'string',
-    'interface.defaultLanguage': 'string',
-    'interface.defaultTheme': 'string',
-    'session.rememberSession': 'boolean',
-  };
+  const validPaths = {
+    'notifications.web': 'boolean',
+    'notifications.email': 'boolean',
+    'notifications.push': 'boolean',
+    'notifications.newFollowers': 'boolean',
+    'notifications.postLikes': 'boolean',
+    'notifications.comments': 'boolean',
+    'notifications.newPost': 'boolean',
+    'privacy.followerApproval': 'boolean',
+    'privacy.showActivity': 'string',
+    'interface.defaultLanguage': 'string',
+    'interface.defaultTheme': 'string',
+    'session.rememberSession': 'boolean',
+  };
 
-  if (!validPaths.hasOwnProperty(key)) {
-    throw new Error(`Invalid settings key: ${key}`);
-  }
+  if (!validPaths.hasOwnProperty(key)) {
+    throw new Error(`Invalid settings key: ${key}`);
+  }
 
-  let processedValue;
-  const expectedType = validPaths[key];
+  let processedValue;
+  const expectedType = validPaths[key];
 
-  const toBoolean = (val) => {
-    if (val === false || val === 'false' || val === 0 || val === '0') return false;
-    return true;
-  };
+  const toBoolean = (val) => {
+    if (val === false || val === 'false' || val === 0 || val === '0') return false;
+    return true;
+  };
 
-  if (expectedType === 'boolean') {
-    processedValue = toBoolean(value);
-  } else if (expectedType === 'string') {
-    if (key === 'content.defaultPostLanguage') {
-      const lang = String(value).toLowerCase();
-      if (!/^[a-z]{2}$/.test(lang)) {
-        throw new Error('Invalid language code');
-      }
-      processedValue = lang;
-    } else if (key === 'privacy.showActivity') {
-      if (!['everyone', 'followers', 'onlyme'].includes(value)) {
-        throw new Error('Invalid showActivity value');
-      }
-      processedValue = value;
-    } else {
-      processedValue = String(value);
-    }
-  }
+  if (expectedType === 'boolean') {
+    processedValue = toBoolean(value);
+  } else if (expectedType === 'string') {
+    if (key === 'content.defaultPostLanguage') {
+      const lang = String(value).toLowerCase();
+      if (!/^[a-z]{2}$/.test(lang)) {
+        throw new Error('Invalid language code');
+      }
+      processedValue = lang;
+    } else if (key === 'privacy.showActivity') {
+      if (!['everyone', 'followers', 'onlyme'].includes(value)) {
+        throw new Error('Invalid showActivity value');
+      }
+      processedValue = value;
+    } else {
+      processedValue = String(value);
+    }
+  }
 
-  const updatedProfile = await this.findOneAndUpdate(
-    { author, cid },
-    { 
-      $set: { [`settings.${key}`]: processedValue },
-      $currentDate: { updated_at: true } 
-    },
-    { new: true, runValidators: true }
-  ).lean();
+  const updateFields = {
+    [`settings.${key}`]: processedValue,
+     $currentDate: { updated_at: true }
+  };
 
-  if (!updatedProfile) {
-    throw new Error('Profile not found');
-  }
+  if (key === 'interface.defaultLanguage') {
+    updateFields.locale = processedValue;
+  }
+  
+  const updatedProfile = await this.findOneAndUpdate(
+    { author, cid },
+    { 
+      $set: updateFields, 
+      $currentDate: { updated_at: true } 
+    },
+    { new: true, runValidators: true }
+  ).lean();
 
-  const cacheKey = `profile:${author}`;
-  await cacheService.delete(cacheKey);
-  return updatedProfile;
+  if (!updatedProfile) {
+    throw new Error('Profile not found');
+  }
+
+  const cacheKey = `profile:${author}`;
+  await cacheService.delete(cacheKey);
+  return updatedProfile;
 };
 
 

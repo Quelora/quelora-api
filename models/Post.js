@@ -11,6 +11,7 @@ const defaultConfig = {
     "allow_shares": true,
     "allow_replies": true,
     "allow_bookmarks": true,
+    "allow_quotes": true,
   },
   "moderation": {
     "enable_toxicity_filter": true,

@@ -447,9 +447,9 @@ clientSchema.methods.validateCaptcha = function(captchaConfig) {
   }
 
   // Validate secretKey
-  if (captchaConfig.enabled && (!captchaConfig.secretKey || typeof captchaConfig.secretKey !== 'string' || captchaConfig.secretKey.length > 250)) {
-    throw new Error('captcha.secretKey must be a non-empty string with max length 250 when enabled');
-  }
+  //if (captchaConfig.enabled && (!captchaConfig.secretKey || typeof captchaConfig.secretKey !== 'string' || captchaConfig.secretKey.length > 250)) {
+  //  throw new Error('captcha.secretKey must be a non-empty string with max length 250 when enabled');
+  //}
 
   // Validate credentialsJson
   if ('credentialsJson' in captchaConfig) {
