@@ -1,5 +1,6 @@
-// SeedRedditThreadComments.js - Versión 2.11 (FINAL Y FUNCIONAL: Corrección de GeoStats COUNTRY/REGION)
-// USO: CID="QU-ME7HF2BN-E8QD9" REDDIT_URL="https://www.reddit.com/r/PeterExplainsTheJoke/comments/1nfvack/peter_is_this_ai_whats_this_bird/" node SeedRedditThreadComments.js
+// SeedRedditThreadComments.js - Versión 2.12 (CORRECCIÓN DE URL EXTERNA Y OBTENCIÓN DE DESCRIPCIÓN)
+// USO: CID="QU-ME7HF2BN-E8QD9" REDDIT_URL="https://www.reddit.com/r/Android/comments/1nr65np/android_will_soon_run_linux_apps_better_by_adding/" REDDIT_ENTITY="QU-ME7HF2BN-E8QD9" node SeedRedditThreadComments.js
+
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
 const connectDB = require('../db');
@@ -30,7 +31,7 @@ const TIMEOUT_MS = 25000;
 const MORE_COMMENTS_BATCH_SIZE = 100;
 // -----------------------------------------------------------
 
-// Datos para perfiles sintéticos
+// Datos para perfiles sintéticos (sin cambios)
 const CITIES = [
     { name: "New York", coords: [-74.0060, 40.7128], country: "United States", countryCode: "US", region: "New York", regionCode: "NY" },
     { name: "Los Angeles", coords: [-118.2437, 34.0522], country: "United States", countryCode: "US", region: "California", regionCode: "CA" },
@@ -48,7 +49,7 @@ async function getRedditAccessToken() {
         console.log('🔑 Obteniendo token de acceso de Reddit...');
         const auth = Buffer.from(`${REDDIT_CLIENT_ID}:${REDDIT_CLIENT_SECRET}`).toString('base64');
         const response = await axios.post('https://www.reddit.com/api/v1/access_token', 'grant_type=client_credentials', {
-            headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Quelora-Seeder/2.11' },
+            headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Quelora-Seeder/2.12' },
             timeout: 10000
         });
         accessToken = response.data.access_token;
@@ -63,7 +64,7 @@ async function getRedditAccessToken() {
 async function makeAuthenticatedRedditRequest(url, method = 'get', data = null) {
     if (!accessToken) await getRedditAccessToken();
     try {
-        const config = { method, url, headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Quelora-Seeder/2.11' }, timeout: TIMEOUT_MS };
+        const config = { method, url, headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Quelora-Seeder/2.12' }, timeout: TIMEOUT_MS };
         if (method === 'post') {
             config.data = data;
             config.headers['Content-Type'] = 'application/x-www-form-urlencoded';
@@ -80,7 +81,7 @@ async function makeAuthenticatedRedditRequest(url, method = 'get', data = null) 
     }
 }
 
-// --- FUNCIONES AUXILIARES (sin cambios significativos) ---
+// --- FUNCIONES AUXILIARES (con modificación en scrapeWebpage) ---
 
 const generateRandomCoords = (baseCoords) => {
     const [lon, lat] = baseCoords;
@@ -115,18 +116,42 @@ const generateValidName = (redditUsername) => {
 
 const decodeHtmlEntities = (str) => str ? str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') : str;
 
+
+/**
+ * 🆕 MODIFICACIÓN CLAVE: Intenta obtener la descripción del meta tag, o la descripción de Open Graph,
+ * o el primer párrafo del cuerpo de la nota.
+ */
 async function scrapeWebpage(url) {
     try {
-        const { data } = await axios.get(url, { headers: { 'User-Agent': 'Quelora-Seeder/2.11' }, timeout: TIMEOUT_MS });
+        console.log(`🌍 Intentando scrapeo de: ${url}`);
+        const { data } = await axios.get(url, { headers: { 'User-Agent': 'Quelora-Seeder/2.12' }, timeout: TIMEOUT_MS });
         const $ = cheerio.load(data);
-        let description = $('meta[name="description"]').attr('content') || $('meta[property="og:description"]').attr('content') || '';
+        
+        // 1. Buscar descripción en meta tags (preferido)
+        let description = $('meta[name="description"]').attr('content') 
+                        || $('meta[property="og:description"]').attr('content') 
+                        || '';
+        
+        // 2. Si no hay meta description, intentar obtener el primer párrafo (general)
+        if (!description) {
+            const firstParagraph = $('p').first().text();
+            if (firstParagraph && firstParagraph.length > 50) {
+                description = firstParagraph.substring(0, 300) + '...'; // Limitar a 300 caracteres
+                console.log('          Descripción obtenida del primer párrafo.');
+            }
+        }
+
+        // 3. Buscar imagen (sin cambios)
         let image = $('meta[property="og:image"]').attr('content') || $('article img').first().attr('src') || null;
         if (image && !image.startsWith('http')) image = new URL(image, new URL(url).origin).href;
+        
         return { description: decodeHtmlEntities(description), image: decodeHtmlEntities(image) };
     } catch (error) {
+        console.error(`⚠️ Error scraping ${url}: ${error.message}`);
         return { description: '', image: null };
     }
 }
+// ... (Funciones de actualización en lote y simulación de petición sin cambios) ...
 
 function accumulateProfileChanges(profileId, changes) {
     const current = profileUpdatesMap.get(profileId.toString()) || { comments: 0, likes: 0 };
@@ -167,10 +192,6 @@ async function bulkUpdateProfileCounters() {
     }
 }
 
-/**
- * SOLUCIÓN DE GEOSTATS: APLANA el objeto de localización y asegura que los campos de GeoStats (clientCountry, etc.)
- * reciban un valor de string válido.
- */
 function simulateRequestFromProfile(profile) {
     const geo = profile.location;
 
@@ -179,17 +200,14 @@ function simulateRequestFromProfile(profile) {
         console.warn(`⚠️ Perfil incompleto para GeoStats (CID: ${cid}).`);
         return null; 
     }
-    
-    // CORRECCIÓN CLAVE: Usamos || '' para asegurar que si el valor es null, se pase una cadena vacía,
-    // pero los datos de CITIES están diseñados para evitar esto, lo esencial es el formato de la key.
+    
     return {
         cid: profile.cid,
         clientIp: `192.0.2.${Math.floor(Math.random() * 255)}`, // IP simple de simulación
         
-        // ¡¡Aseguramos que los campos requeridos existan en el nivel superior!!
         clientCountry: geo.country || '', 
         clientCountryCode: geo.countryCode || '',
-        clientRegion: geo.region || '',
+        clientRegion: geo.city || '',
         clientRegionCode: geo.regionCode || '',
         clientCity: geo.city || '',
         clientLatitude: geo.coordinates[1],
@@ -199,8 +217,13 @@ function simulateRequestFromProfile(profile) {
     };
 }
 
-// --- LÓGICA PRINCIPAL DE SEEDING ---
+// --- LÓGICA PRINCIPAL DE SEEDING (Modificaciones en fetchRedditData y createOrFindPost) ---
 
+/**
+ * 🆕 MODIFICACIÓN CLAVE: Se separa la URL externa del permalink de Reddit.
+ * También se utiliza el valor de post.url (que es la URL externa para Link Posts)
+ * para realizar el scraping condicionalmente.
+ */
 async function fetchRedditData(threadUrl, limit = 1000) {
     const threadMatch = threadUrl.match(/comments\/([a-z0-9]+)/i);
     if (!threadMatch) throw new Error('URL de Reddit inválida');
@@ -209,29 +232,53 @@ async function fetchRedditData(threadUrl, limit = 1000) {
     const apiUrl = `https://oauth.reddit.com/r/${subreddit}/comments/${threadId}.json?limit=${limit}&threaded=true&sort=top`;
     console.log(`📡 Obteniendo datos iniciales de: ${apiUrl}`);
     const [postData, commentsData] = await makeAuthenticatedRedditRequest(apiUrl);
+    
     const post = postData.data.children[0].data;
-    const comments = commentsData.data.children;
+    
+    // 1. Definir las URLs
+    const redditPermalink = `https://reddit.com${post.permalink}`;
+    const externalUrl = (post.is_self || !post.url || post.url.includes(redditPermalink)) ? null : post.url;
+    
     let imageUrl = null;
-    if (post.preview?.images?.[0]) imageUrl = decodeHtmlEntities(post.preview.images[0].source.url);
-    else if (post.url && /\.(jpg|png|gif)$/.test(post.url)) imageUrl = decodeHtmlEntities(post.url);
-    else if (post.url_overridden_by_dest && /\.(jpg|png|gif)$/.test(post.url_overridden_by_dest)) imageUrl = decodeHtmlEntities(post.url_overridden_by_dest);
-    let description = post.selftext || '';
-    if (!description && post.url && !post.is_self && post.url.startsWith('http')) {
-        const scrapedData = await scrapeWebpage(post.url);
-        description = scrapedData.description || '';
-        if (!imageUrl) imageUrl = scrapedData.image || null;
+    let description = post.selftext || ''; // Inicialmente, usa el texto del post si es un self-post
+
+    // 2. Procesamiento de URLs (Imágenes y Scraping de Descripción/Imagen)
+    if (post.preview?.images?.[0]) {
+        imageUrl = decodeHtmlEntities(post.preview.images[0].source.url);
+    } else if (post.url && /\.(jpg|png|gif)$/.test(post.url)) {
+        imageUrl = decodeHtmlEntities(post.url);
+    } else if (post.url_overridden_by_dest && /\.(jpg|png|gif)$/.test(post.url_overridden_by_dest)) {
+        imageUrl = decodeHtmlEntities(post.url_overridden_by_dest);
     }
+
+    // 3. SCRAPING para descripción si es un Link Post que no es una imagen
+    if (externalUrl && !imageUrl) {
+        const scrapedData = await scrapeWebpage(externalUrl);
+        description = scrapedData.description || description; // Priorizar la descripción scrapeada
+        if (!imageUrl) imageUrl = scrapedData.image || null;
+    } else if (externalUrl && imageUrl) {
+        // A veces el post de Reddit no tiene descripción, pero tiene una imagen
+        console.log(`🖼️ Es un post de imagen. No se intenta obtener la descripción externa.`);
+    }
+
     return {
         post: {
             title: post.title, description, upvotes: post.ups, comments: post.num_comments,
-            created: post.created_utc, url: `https://reddit.com${post.permalink}`, image: imageUrl,
+            created: post.created_utc, 
+            
+            // 🆕 La URL que se guarda en LINK y REFERENCE
+            url: externalUrl || redditPermalink, 
+            
+            reddit_url: redditPermalink, // URL de Reddit (para metadatos internos si es necesario)
+            image: imageUrl,
         },
-        comments: comments.filter(c => c.kind === 't1'),
-        moreComments: comments.filter(c => c.kind === 'more').flatMap(more => more.data.children)
+        comments: commentsData.data.children.filter(c => c.kind === 't1'),
+        moreComments: commentsData.data.children.filter(c => c.kind === 'more').flatMap(more => more.data.children)
     };
 }
 
 async function fetchMoreComments(threadId, childrenIds) {
+// ... (sin cambios) ...
     try {
         console.log(`📡 Obteniendo lote de ${childrenIds.length} comentarios adicionales...`);
         const data = new URLSearchParams({ api_type: 'json', children: childrenIds.join(','), link_id: `t3_${threadId}`, sort: 'top' });
@@ -243,6 +290,10 @@ async function fetchMoreComments(threadId, childrenIds) {
     }
 }
 
+/**
+ * 🆕 MODIFICACIÓN CLAVE: Utiliza 'redditData.post.url' para 'link' y 'reference',
+ * que ahora contiene la URL externa (si existe).
+ */
 async function createOrFindPost(redditData, entityId, moreComments) {
     let post = await Post.findOne({ entity: entityId }).maxTimeMS(TIMEOUT_MS);
     if (post) {
@@ -254,9 +305,16 @@ async function createOrFindPost(redditData, entityId, moreComments) {
         return post;
     }
     const postData = {
-        cid: process.env.CID || 'QU-ME7HF2BN-E8QD9', entity: entityId, reference: redditData.post.url,
-        title: redditData.post.title.substring(0, 100), description: redditData.post.description,
-        type: 'reddit_crosspost', link: redditData.post.url, image: redditData.post.image,
+        cid: process.env.CID || 'QU-ME7HF2BN-E8QD9', entity: entityId, 
+        
+        // 🆕 Se usa la URL que ahora es la externa (si está disponible)
+        reference: redditData.post.url, 
+        title: redditData.post.title.substring(0, 100), 
+        description: redditData.post.description, // Descripción obtenida del scraping
+        type: 'reddit_crosspost', 
+        link: redditData.post.url, // 🆕 Se usa la URL que ahora es la externa (si está disponible)
+        
+        image: redditData.post.image,
         likes: [], likesCount: redditData.post.upvotes || 0, commentCount: redditData.post.comments || 0,
         viewsCount: Math.floor((redditData.post.upvotes || 0) * 15),
         created_at: new Date(redditData.post.created * 1000), updated_at: new Date(redditData.post.created * 1000),
@@ -267,6 +325,9 @@ async function createOrFindPost(redditData, entityId, moreComments) {
     console.log(`✅ Post creado: ${post._id}`);
     return post;
 }
+
+// ... (El resto del script, incluyendo getOrCreateProfile, processCommentsRecursively y seedRedditThread, sigue igual) ...
+
 
 async function getOrCreateProfile(redditAuthor) {
     if (authorToNameMap.has(redditAuthor)) {
@@ -348,15 +409,15 @@ async function processCommentsRecursively(commentsData, postId, entityId, allPro
                 await new ProfileComment({ profile_id: profile._id, post_id: postId, comment_id: newComment._id }).save();
                 accumulateProfileChanges(profile._id, { comments: 1 });
 
-                // --- REGISTRO DE ACTIVIDAD (GENERAL Y GEOGRÁFICA) ---
+                // --- REGISTRO DE ACTIVIDAD (GENERAL Y GEOGRÁFICA) ---
                 const activityType = parentId ? 'replies' : 'comments';
-                const simulatedReq = simulateRequestFromProfile(profile.toObject()); 
-                
-                if (simulatedReq) {
+                const simulatedReq = simulateRequestFromProfile(profile.toObject()); 
+                
+                if (simulatedReq) {
                     await recordActivityHit(`activity:${activityType}:${process.env.CID}`, 'added', 1);
-                    // REGISTRO GEOGRÁFICO
-                    await recordGeoActivity(simulatedReq, parentId ? 'reply' : 'comment'); 
-                }
+                    // REGISTRO GEOGRÁFICO
+                    await recordGeoActivity(simulatedReq, parentId ? 'reply' : 'comment'); 
+                }
                 // ---------------------------------------------------
 
 
@@ -368,8 +429,8 @@ async function processCommentsRecursively(commentsData, postId, entityId, allPro
                         const selectedLikers = shuffledLikerPool.slice(0, numLikesToCreate); 
                         
                         const profileLikeDocs = selectedLikers.map(liker => ({ 
-                            profile_id: liker._id, fk_id: newComment._id, fk_type: 'comment' 
-                        }));
+                            profile_id: liker._id, fk_id: newComment._id, fk_type: 'comment' 
+                        }));
                         
                         if (profileLikeDocs.length > 0) {
                             await ProfileLike.insertMany(profileLikeDocs);
@@ -377,17 +438,17 @@ async function processCommentsRecursively(commentsData, postId, entityId, allPro
                             
                             await recordActivityHit(`activity:likes:${process.env.CID}`, 'added', profileLikeDocs.length);
 
-                            // --- REGISTRO GEOGRÁFICO para CADA LIKER (SOLUCIÓN DE GEOSTATS)
-                            for (const likerProfile of selectedLikers) {
-                                const likerReq = simulateRequestFromProfile(likerProfile);
-                                if (likerReq) {
-                                    await recordGeoActivity(likerReq, 'like');
-                                }
-                                accumulateProfileChanges(likerProfile._id, { likes: 1 });
-                            }
+                            // --- REGISTRO GEOGRÁFICO para CADA LIKER (SOLUCIÓN DE GEOSTATS)
+                            for (const likerProfile of selectedLikers) {
+                                const likerReq = simulateRequestFromProfile(likerProfile);
+                                if (likerReq) {
+                                    await recordGeoActivity(likerReq, 'like');
+                                }
+                                accumulateProfileChanges(likerProfile._id, { likes: 1 });
+                            }
                             // ---------------------------------------------
                             
-                            const likerAuthors = selectedLikers.map(l => l.author);
+                            const likerAuthors = selectedLikers.map(l => l.author);
                             await Comment.findByIdAndUpdate(newComment._id, {
                                 $push: { likes: { $each: likerAuthors, $slice: -200 } }
                             });
@@ -434,6 +495,14 @@ async function seedRedditThread() {
         if (!post?.metadata?.imported_comments) {
             console.log("⏳ Realizando importación inicial...");
             const redditData = await fetchRedditData(REDDIT_THREAD_URL, REDDIT_LIMIT);
+            
+            // ⚠️ Validación para confirmar que se ha obtenido un link de referencia
+            if (!redditData.post.url || redditData.post.url.includes('reddit.com')) {
+                console.warn('⚠️ No se pudo obtener una URL de referencia externa válida. Se utilizará el permalink de Reddit.');
+            } else {
+                console.log(`🔗 URL Externa identificada y scrapeada: ${redditData.post.url}`);
+            }
+                
             post = await createOrFindPost(redditData, entityId, redditData.moreComments);
             
             const { count, moreIds } = await processCommentsRecursively(redditData.comments, post._id, entityId, allProfiles, null);
@@ -482,5 +551,5 @@ async function seedRedditThread() {
     }
 }
 
-console.log('🚀 Iniciando seedRedditThread (versión 2.11)...');
+console.log('🚀 Iniciando seedRedditThread (versión 2.12)...');
 seedRedditThread();
