@@ -1,5 +1,5 @@
-// SeedRedditThreadComments.js - Versión 2.16 (LIMPIEZA: Depende del Post Seeder para la URL externa)
-// USO: CID="QU-ME7HF2BN-E8QD9" REDDIT_URL="https://www.reddit.com/r/Android/comments/1nr65np/android_will_soon_run_linux_apps_better_by_adding/" node SeedRedditThreadComments.js
+// SeedRedditThreadComments.js - Versión 2.15 (CORRECCIÓN FINAL: Scrapeo de HTML de Reddit para Link Externo)
+// USO: CID="QU-ME7HF2BN-E8QD9" REDDIT_URL="https://www.reddit.com/r/Android/comments/1nr65np/android_will_soon_run_linux_apps_better_by_adding/" REDDIT_ENTITY="QU-ME7HF2BN-E8QD9" node SeedRedditThreadComments.js
 
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
@@ -49,7 +49,7 @@ async function getRedditAccessToken() {
         console.log('🔑 Obteniendo token de acceso de Reddit...');
         const auth = Buffer.from(`${REDDIT_CLIENT_ID}:${REDDIT_CLIENT_SECRET}`).toString('base64');
         const response = await axios.post('https://www.reddit.com/api/v1/access_token', 'grant_type=client_credentials', {
-            headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Quelora-Seeder/2.16' },
+            headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Quelora-Seeder/2.15' },
             timeout: 10000
         });
         accessToken = response.data.access_token;
@@ -64,7 +64,7 @@ async function getRedditAccessToken() {
 async function makeAuthenticatedRedditRequest(url, method = 'get', data = null) {
     if (!accessToken) await getRedditAccessToken();
     try {
-        const config = { method, url, headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Quelora-Seeder/2.16' }, timeout: TIMEOUT_MS };
+        const config = { method, url, headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Quelora-Seeder/2.15' }, timeout: TIMEOUT_MS };
         if (method === 'post') {
             config.data = data;
             config.headers['Content-Type'] = 'application/x-www-form-urlencoded';
@@ -81,7 +81,7 @@ async function makeAuthenticatedRedditRequest(url, method = 'get', data = null) 
     }
 }
 
-// --- FUNCIONES AUXILIARES ---
+// --- FUNCIONES AUXILIARES (scrapeWebpage y GeoStats modificadas) ---
 
 const generateRandomCoords = (baseCoords) => {
     const [lon, lat] = baseCoords;
@@ -116,6 +116,75 @@ const generateValidName = (redditUsername) => {
 
 const decodeHtmlEntities = (str) => str ? str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') : str;
 
+
+/**
+ * Raspa el HTML del permalink de Reddit para encontrar la URL externa.
+ * Utiliza el selector CSS basado en la estructura de 'faceplate-tracker'.
+ * @param {string} redditPermalink - La URL del post de Reddit (e.g., https://www.reddit.com/r/apple/comments/1nzmtk2/...)
+ * @returns {Promise<string|null>} La URL externa si se encuentra, o null.
+ */
+async function scrapeRedditForExternalLink(redditPermalink) {
+    try {
+        console.log(`🔎 Scrapeando HTML de Reddit para link externo: ${redditPermalink}`);
+        // Fetch HTML of the Reddit page (NOT the JSON API)
+        const { data } = await axios.get(redditPermalink, { headers: { 'User-Agent': 'Quelora-Seeder/2.15' }, timeout: TIMEOUT_MS });
+        const $ = cheerio.load(data);
+        
+        // Selector basado en la estructura proporcionada por el usuario
+        const selector = 'faceplate-tracker a[target="_blank"][rel*="noopener"][rel*="nofollow"][class*="border-solid"]';
+
+        const externalAnchor = $(selector).first();
+        
+        if (externalAnchor.length > 0) {
+            const externalHref = externalAnchor.attr('href');
+            console.log(`✅ Link externo encontrado en el HTML de Reddit: ${externalHref}`);
+            return externalHref;
+        }
+
+        console.log('⚠️ No se encontró el enlace externo en el HTML de Reddit con el selector provisto.');
+        return null;
+    } catch (error) {
+        console.error(`❌ Error al intentar scrapear el permalink de Reddit: ${error.message}`);
+        return null;
+    }
+}
+
+
+/**
+ * Implementación de scraping de la URL de destino.
+ */
+async function scrapeWebpage(url) {
+    try {
+        console.log(`🌍 Intentando scrapeo de la página de destino: ${url}`);
+        const { data } = await axios.get(url, { headers: { 'User-Agent': 'Quelora-Seeder/2.15' }, timeout: TIMEOUT_MS });
+        const $ = cheerio.load(data);
+        
+        // 1. Buscar descripción en meta tags (preferido)
+        let description = $('meta[name="description"]').attr('content') 
+                        || $('meta[property="og:description"]').attr('content') 
+                        || '';
+        
+        // 2. Si no hay meta description, intentar obtener el primer párrafo (general)
+        if (!description) {
+            const firstParagraph = $('p').first().text();
+            if (firstParagraph && firstParagraph.length > 50) {
+                description = firstParagraph.substring(0, 300) + '...'; // Limitar a 300 caracteres
+                console.log('          Descripción obtenida del primer párrafo.');
+            }
+        }
+
+        // 3. Buscar imagen 
+        let image = $('meta[property="og:image"]').attr('content') || $('article img').first().attr('src') || null;
+        if (image && !image.startsWith('http')) image = new URL(image, new URL(url).origin).href;
+        
+        return { description: decodeHtmlEntities(description), image: decodeHtmlEntities(image) };
+    } catch (error) {
+        console.error(`⚠️ Error scraping ${url}: ${error.message}`);
+        return { description: '', image: null };
+    }
+}
+
+
 function accumulateProfileChanges(profileId, changes) {
     const current = profileUpdatesMap.get(profileId.toString()) || { comments: 0, likes: 0 };
     profileUpdatesMap.set(profileId.toString(), {
@@ -126,8 +195,7 @@ function accumulateProfileChanges(profileId, changes) {
 
 async function bulkUpdateProfileCounters() {
     if (profileUpdatesMap.size === 0) return;
-    
-    // ... (Lógica de bulkUpdateProfileCounters sin cambios) ...
+
     console.log(`⏳ Iniciando actualización en lote para ${profileUpdatesMap.size} perfiles...`);
     const bulkOps = [];
     
@@ -157,7 +225,7 @@ async function bulkUpdateProfileCounters() {
 }
 
 /**
- * 🛠️ CORRECCIÓN: clientRegion usa geo.region para la simulación de GeoStats.
+ * 🛠️ CORRECCIÓN: clientRegion usa geo.region para resolver la inconsistencia de GeoStats.
  */
 function simulateRequestFromProfile(profile) {
     const geo = profile.location;
@@ -174,7 +242,7 @@ function simulateRequestFromProfile(profile) {
         
         clientCountry: geo.country || '', 
         clientCountryCode: geo.countryCode || '',
-        clientRegion: geo.region || '', 
+        clientRegion: geo.region || '', // 🛠️ CORREGIDO
         clientRegionCode: geo.regionCode || '',
         clientCity: geo.city || '',
         clientLatitude: geo.coordinates[1],
@@ -184,10 +252,10 @@ function simulateRequestFromProfile(profile) {
     };
 }
 
-// --- LÓGICA PRINCIPAL DE SEEDING (Simplificada) ---
+// --- LÓGICA PRINCIPAL DE SEEDING (Corregida) ---
 
 /**
- * 🛠️ SIMPLIFICADO: Solo obtiene el JSON de comentarios. La lógica del post fue movida.
+ * 🛠️ CORRECCIÓN PRINCIPAL: Ahora intenta raspar la URL externa del HTML de Reddit si la API falla.
  */
 async function fetchRedditData(threadUrl, limit = 1000) {
     const threadMatch = threadUrl.match(/comments\/([a-z0-9]+)/i);
@@ -195,17 +263,52 @@ async function fetchRedditData(threadUrl, limit = 1000) {
     const threadId = threadMatch[1];
     const subreddit = threadUrl.split('/r/')[1].split('/')[0];
     const apiUrl = `https://oauth.reddit.com/r/${subreddit}/comments/${threadId}.json?limit=${limit}&threaded=true&sort=top`;
-    console.log(`📡 Obteniendo datos de comentarios de: ${apiUrl}`);
+    console.log(`📡 Obteniendo datos iniciales de: ${apiUrl}`);
     const [postData, commentsData] = await makeAuthenticatedRedditRequest(apiUrl);
     
     const post = postData.data.children[0].data;
     
+    const redditPermalink = `https://reddit.com${post.permalink}`;
+    
+    // 1. Intento inicial: usar el campo 'url' de la API (si no es un self-post o un permalink de Reddit)
+    let externalUrl = (!post.is_self && post.url && !post.url.includes('reddit.com')) ? post.url : null;
+    
+    // 2. Fallback/Corrección: Si la API falló en dar el link (o dio el permalink de Reddit),
+    // scrapeamos el HTML de la página de Reddit.
+    if (!externalUrl || externalUrl.includes('reddit.com')) {
+        const scrapedExternalUrl = await scrapeRedditForExternalLink(redditPermalink);
+        if (scrapedExternalUrl) {
+            externalUrl = scrapedExternalUrl;
+        }
+    }
+    
+    let imageUrl = null;
+    let description = post.selftext || ''; // Usa el self-text como valor predeterminado
+    
+    // Lógica de la imagen
+    if (post.preview?.images?.[0]) imageUrl = decodeHtmlEntities(post.preview.images[0].source.url);
+    else if (post.url && /\.(jpg|png|gif)$/.test(post.url)) imageUrl = decodeHtmlEntities(post.url);
+    else if (post.url_overridden_by_dest && /\.(jpg|png|gif)$/.test(post.url_overridden_by_dest)) imageUrl = decodeHtmlEntities(post.url_overridden_by_dest);
+    
+    // 3. SCRAPING para descripción desde la URL EXTERNA OBTENIDA
+    if (externalUrl && !imageUrl) {
+        const scrapedData = await scrapeWebpage(externalUrl);
+        description = scrapedData.description || description; // Priorizar la descripción scrapeada
+        if (!imageUrl) imageUrl = scrapedData.image || null;
+    } else if (externalUrl && imageUrl) {
+        console.log(`🖼️ Es un post de imagen. No se intenta obtener la descripción externa.`);
+    }
+
     return {
         post: {
-            title: post.title,
-            upvotes: post.ups,
-            comments: post.num_comments,
+            title: post.title, description, upvotes: post.ups, comments: post.num_comments,
             created: post.created_utc, 
+            
+            // 'url' es ahora la URL externa si se pudo obtener
+            url: externalUrl || redditPermalink, 
+            
+            reddit_url: redditPermalink, // URL de Reddit (para metadatos internos si es necesario)
+            image: imageUrl,
         },
         comments: commentsData.data.children.filter(c => c.kind === 't1'),
         moreComments: commentsData.data.children.filter(c => c.kind === 'more').flatMap(more => more.data.children)
@@ -225,19 +328,36 @@ async function fetchMoreComments(threadId, childrenIds) {
 }
 
 /**
- * 🛠️ SIMPLIFICADO: Solo encuentra el Post existente.
+ * 'reference' y 'link' usan 'redditData.post.url', que ya es la URL externa (si existe).
  */
 async function createOrFindPost(redditData, entityId, moreComments) {
     let post = await Post.findOne({ entity: entityId }).maxTimeMS(TIMEOUT_MS);
-    if (!post) {
-        throw new Error(`❌ Post con entity ${entityId} no encontrado. Ejecute SeedRedditThread.js primero.`);
-    }
-
-    console.log(`✅ Post existente encontrado: ${post._id}`);
-    if (post.moreCommentsRef.length === 0 && moreComments.length > 0) {
-        post.moreCommentsRef = moreComments;
-        await post.save();
+    if (post) {
+        console.log(`✅ Post existente encontrado: ${post._id}`);
+        if (post.moreCommentsRef.length === 0 && moreComments.length > 0) {
+            post.moreCommentsRef = moreComments;
+            await post.save();
+        }
+        return post;
     }
+    const postData = {
+        cid: process.env.CID || 'QU-ME7HF2BN-E8QD9', entity: entityId, 
+        
+        reference: redditData.post.url, // URL externa o permalink
+        title: redditData.post.title.substring(0, 100), 
+        description: redditData.post.description, // Descripción scrapeada/self-text
+        type: 'reddit_crosspost', 
+        link: redditData.post.url, // URL externa o permalink
+        
+        image: redditData.post.image,
+        likes: [], likesCount: redditData.post.upvotes || 0, commentCount: redditData.post.comments || 0,
+        viewsCount: Math.floor((redditData.post.upvotes || 0) * 15),
+        created_at: new Date(redditData.post.created * 1000), updated_at: new Date(redditData.post.created * 1000),
+        moreCommentsRef: moreComments
+    };
+    post = new Post(postData);
+    await post.save();
+    console.log(`✅ Post creado: ${post._id}`);
     return post;
 }
 
@@ -402,15 +522,20 @@ async function seedRedditThread() {
 
         const entityId = REDDIT_THREAD_ENTITY;
         const threadId = REDDIT_THREAD_URL.match(/comments\/([a-z0-9]+)/i)[1];
-        
-        // 🛠️ SOLO OBTENEMOS EL JSON DE COMENTARIOS
-        const redditData = await fetchRedditData(REDDIT_THREAD_URL, REDDIT_LIMIT);
-        
-        // 🛠️ BUSCAMOS EL POST EXISTENTE (creado por SeedRedditThread.js)
-        let post = await createOrFindPost(redditData, entityId, redditData.moreComments);
-        
+        let post = await Post.findOne({ entity: entityId });
+
         if (!post?.metadata?.imported_comments) {
-            console.log("⏳ Realizando importación inicial de comentarios...");
+            console.log("⏳ Realizando importación inicial...");
+            const redditData = await fetchRedditData(REDDIT_THREAD_URL, REDDIT_LIMIT);
+            
+            // ⚠️ Validación para confirmar que se ha obtenido un link de referencia
+            if (!redditData.post.url || redditData.post.url.includes('reddit.com')) {
+                console.warn('⚠️ No se pudo obtener una URL de referencia externa válida. Se utilizará el permalink de Reddit.');
+            } else {
+                console.log(`🔗 URL Externa identificada y scrapeada: ${redditData.post.url}`);
+            }
+                
+            post = await createOrFindPost(redditData, entityId, redditData.moreComments);
             
             const { count, moreIds } = await processCommentsRecursively(redditData.comments, post._id, entityId, allProfiles, null);
             
@@ -458,5 +583,5 @@ async function seedRedditThread() {
     }
 }
 
-console.log('🚀 Iniciando seedRedditThread (versión 2.16)...');
+console.log('🚀 Iniciando seedRedditThread (versión 2.15 - Corregida)...');
 seedRedditThread();
