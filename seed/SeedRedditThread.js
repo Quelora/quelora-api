@@ -1,4 +1,4 @@
-// SeedRedditThread.js - Versión 2.16 (CORRECCIÓN: Centraliza Scrapeo de Link/Descripción en Post Seeder)
+// SeedRedditThread.js - Versión 2.17 (CORRECCIÓN: Asignación correcta de Reference vs. Link)
 // USO: node SeedRedditThread.js
 // USO PROGRAMADO: node SeedRedditThread.js --scheduled
 
@@ -19,7 +19,7 @@ const POST_LIMIT = process.env.TRENDING_LIMIT || 500;
 const MIN_COMMENTS = process.env.MIN_COMMENTS || 50;
 
 // --- ESTRATEGIA DE BATCHING PARA CONTADORES DE PERFILES ---
-const profileUpdatesMap = new Map(); // Mapa para acumular { profileId: { likes: N } }
+const profileUpdatesMap = new Map(); 
 const TIMEOUT_MS = 25000;
 // -----------------------------------------------------------
 
@@ -36,20 +36,19 @@ const TECH_SUBREDDITS = [
 
 let accessToken = null;
 
-// --- FUNCIONES DE SCRAPING (NUEVAS / MOVIDAS) ---
+// --- FUNCIONES DE SCRAPING ---
 
 const decodeHtmlEntities = (str) => str ? str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') : str;
 
 /**
- * 🆕 NUEVA FUNCIÓN: Raspa el HTML del permalink de Reddit para encontrar la URL externa.
+ * Raspa el HTML del permalink de Reddit para encontrar la URL externa.
  */
 async function scrapeRedditForExternalLink(redditPermalink) {
     try {
         console.log(`🔎 Scrapeando HTML de Reddit para link externo: ${redditPermalink}`);
-        const { data } = await axios.get(redditPermalink, { headers: { 'User-Agent': 'TechPosts-Importer/2.16' }, timeout: TIMEOUT_MS });
+        const { data } = await axios.get(redditPermalink, { headers: { 'User-Agent': 'TechPosts-Importer/2.17' }, timeout: TIMEOUT_MS });
         const $ = cheerio.load(data);
         
-        // Selector basado en la estructura de 'faceplate-tracker'
         const selector = 'faceplate-tracker a[target="_blank"][rel*="noopener"][rel*="nofollow"][class*="border-solid"]';
 
         const externalAnchor = $(selector).first();
@@ -69,24 +68,22 @@ async function scrapeRedditForExternalLink(redditPermalink) {
 
 
 /**
- * 🆕 FUNCIÓN MOVIDA/MEJORADA: Implementación de scraping de la URL de destino para la descripción.
+ * Implementación de scraping de la URL de destino para la descripción.
  */
 async function scrapeWebpage(url) {
     try {
         console.log(`🌍 Intentando scrapeo de la descripción de: ${url}`);
-        const { data } = await axios.get(url, { headers: { 'User-Agent': 'TechPosts-Importer/2.16' }, timeout: TIMEOUT_MS });
+        const { data } = await axios.get(url, { headers: { 'User-Agent': 'TechPosts-Importer/2.17' }, timeout: TIMEOUT_MS });
         const $ = cheerio.load(data);
         
-        // 1. Buscar descripción en meta tags (preferido)
         let description = $('meta[name="description"]').attr('content') 
                         || $('meta[property="og:description"]').attr('content') 
                         || '';
         
-        // 2. Si no hay meta description, intentar obtener el primer párrafo (general)
         if (!description) {
             const firstParagraph = $('p').first().text();
             if (firstParagraph && firstParagraph.length > 50) {
-                description = firstParagraph.substring(0, 300) + '...'; // Limitar a 300 caracteres
+                description = firstParagraph.substring(0, 300) + '...'; 
             }
         }
 
@@ -98,7 +95,7 @@ async function scrapeWebpage(url) {
 }
 
 
-// --- FUNCIONES DE BATCHING Y REDDIT API (User-Agent actualizado) ---
+// --- FUNCIONES DE BATCHING Y REDDIT API ---
 
 function accumulateProfileChanges(profileId, changes) {
     const current = profileUpdatesMap.get(profileId.toString()) || { likes: 0 };
@@ -146,7 +143,7 @@ async function getRedditAccessToken() {
                 headers: {
                     'Authorization': `Basic ${auth}`,
                     'Content-Type': 'application/x-www-form-urlencoded',
-                    'User-Agent': 'TechPosts-Importer/2.16'
+                    'User-Agent': 'TechPosts-Importer/2.17'
                 },
                 timeout: 10000
             }
@@ -169,7 +166,7 @@ async function makeRedditRequest(url) {
         const response = await axios.get(url, {
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
-                'User-Agent': 'TechPosts-Importer/2.16'
+                'User-Agent': 'TechPosts-Importer/2.17'
             },
             timeout: 15000
         });
@@ -371,6 +368,9 @@ async function simulatePostLikes(postId, likesCount, allProfileIds) {
     }
 }
 
+/**
+ * 🛠️ LÓGICA CORREGIDA: Asigna postData.url (Permalink de Reddit) a 'reference' y la finalLink (Externa) a 'link'.
+ */
 async function importPost(postData, allProfileIds) {
     const entityId = generateEntityId(postData.url);
     
@@ -381,7 +381,7 @@ async function importPost(postData, allProfileIds) {
     
     // 1. DETERMINAR URL FINAL Y BUSCAR DESCRIPCIÓN
     let finalLink = postData.external_link_api;
-    let description = postData.description; // Selftext o vacío
+    let description = postData.description; 
     
     // Si la URL de la API es el permalink de Reddit (o no es obvia), raspamos el HTML
     if (!finalLink || finalLink.includes('reddit.com')) {
@@ -389,8 +389,7 @@ async function importPost(postData, allProfileIds) {
         if (scrapedLink) {
             finalLink = scrapedLink;
         } else {
-            // Si el scraping HTML falla, usamos el permalink de Reddit como link final (fallback)
-            finalLink = postData.url; 
+            finalLink = postData.url; // Fallback al permalink si no se encuentra enlace externo
         }
     }
 
@@ -401,7 +400,6 @@ async function importPost(postData, allProfileIds) {
     }
 
     // 3. Control de contenido para posts sin media
-    // Solo permitimos posts que tienen media O que tienen un link externo útil
     if (!hasMediaContent(postData) && finalLink.includes('reddit.com')) {
         console.log(`❌ Post sin multimedia Y sin link externo - SKIPPED: r/${postData.subreddit} - ${postData.title.substring(0, 60)}...`);
         return { skipped: true, reason: 'no_media' };
@@ -413,11 +411,11 @@ async function importPost(postData, allProfileIds) {
         const post = new Post({
             cid: process.env.CID || 'QU-ME7HF2BN-E8QD9',
             entity: entityId,
-            reference: finalLink, // URL FINAL DEL ARTÍCULO
+            reference: postData.url, // 🛠️ CORREGIDO: URL de Reddit (Permalink)
             title: postData.title.substring(0, 100),
-            description: description.substring(0, 200) || '', // Descripción scrapeada/selftext
+            description: description.substring(0, 200) || '',
             type: 'reddit_tech',
-            link: finalLink, // URL FINAL DEL ARTÍCULO
+            link: finalLink, // 🛠️ CORREGIDO: URL Externa (o permalink si no hay externa)
             image: primaryMedia, 
             media: postData.media, 
             likesCount: postData.upvotes,
@@ -431,7 +429,7 @@ async function importPost(postData, allProfileIds) {
                 nsfw: postData.nsfw,
                 original_comments: postData.comments,
                 imported_comments: false,
-                reddit_permalink: postData.url, // Guardamos el permalink de Reddit como metadata
+                reddit_permalink: postData.url, 
                 has_image: !!postData.image,
                 has_video: !!postData.video,
                 has_gallery: !!postData.gallery,
