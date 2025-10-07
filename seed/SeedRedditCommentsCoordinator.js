@@ -1,9 +1,10 @@
 // SeedRedditCommentsCoordinator.js - Coordinador de importación de comentarios
 // USO: node SeedRedditCommentsCoordinator.js
+// node SeedRedditCommentsCoordinator.js --scheduled
 
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
-const connectDB = require('../db');
+const connectDB = require('../db'); 
 const Post = require('../models/Post');
 const { spawn } = require('child_process');
 const path = require('path');

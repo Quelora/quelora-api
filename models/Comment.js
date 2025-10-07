@@ -33,7 +33,7 @@ const commentSchema = new mongoose.Schema({
   reference: {
     type: String,
     required: false,
-    unique: true,
+    unique: false,
     index: true
   },
   language: {
