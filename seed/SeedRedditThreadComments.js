@@ -1,5 +1,5 @@
-// SeedRedditThreadComments.js - Versión 2.12 (CORRECCIÓN DE URL EXTERNA Y OBTENCIÓN DE DESCRIPCIÓN)
-// USO: CID="QU-ME7HF2BN-E8QD9" REDDIT_URL="https://www.reddit.com/r/Android/comments/1nr65np/android_will_soon_run_linux_apps_better_by_adding/" REDDIT_ENTITY="QU-ME7HF2BN-E8QD9" node SeedRedditThreadComments.js
+// SeedRedditThreadComments.js - Versión 2.16 (LIMPIEZA: Depende del Post Seeder para la URL externa)
+// USO: CID="QU-ME7HF2BN-E8QD9" REDDIT_URL="https://www.reddit.com/r/Android/comments/1nr65np/android_will_soon_run_linux_apps_better_by_adding/" node SeedRedditThreadComments.js
 
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
@@ -43,13 +43,13 @@ const CITIES = [
 
 let accessToken = null;
 
-// --- FUNCIONES DE AUTENTICACIÓN Y REDDIT (sin cambios) ---
+// --- FUNCIONES DE AUTENTICACIÓN Y REDDIT (User-Agent actualizado) ---
 async function getRedditAccessToken() {
     try {
         console.log('🔑 Obteniendo token de acceso de Reddit...');
         const auth = Buffer.from(`${REDDIT_CLIENT_ID}:${REDDIT_CLIENT_SECRET}`).toString('base64');
         const response = await axios.post('https://www.reddit.com/api/v1/access_token', 'grant_type=client_credentials', {
-            headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Quelora-Seeder/2.12' },
+            headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Quelora-Seeder/2.16' },
             timeout: 10000
         });
         accessToken = response.data.access_token;
@@ -64,7 +64,7 @@ async function getRedditAccessToken() {
 async function makeAuthenticatedRedditRequest(url, method = 'get', data = null) {
     if (!accessToken) await getRedditAccessToken();
     try {
-        const config = { method, url, headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Quelora-Seeder/2.12' }, timeout: TIMEOUT_MS };
+        const config = { method, url, headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Quelora-Seeder/2.16' }, timeout: TIMEOUT_MS };
         if (method === 'post') {
             config.data = data;
             config.headers['Content-Type'] = 'application/x-www-form-urlencoded';
@@ -81,7 +81,7 @@ async function makeAuthenticatedRedditRequest(url, method = 'get', data = null) 
     }
 }
 
-// --- FUNCIONES AUXILIARES (con modificación en scrapeWebpage) ---
+// --- FUNCIONES AUXILIARES ---
 
 const generateRandomCoords = (baseCoords) => {
     const [lon, lat] = baseCoords;
@@ -116,43 +116,6 @@ const generateValidName = (redditUsername) => {
 
 const decodeHtmlEntities = (str) => str ? str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') : str;
 
-
-/**
- * 🆕 MODIFICACIÓN CLAVE: Intenta obtener la descripción del meta tag, o la descripción de Open Graph,
- * o el primer párrafo del cuerpo de la nota.
- */
-async function scrapeWebpage(url) {
-    try {
-        console.log(`🌍 Intentando scrapeo de: ${url}`);
-        const { data } = await axios.get(url, { headers: { 'User-Agent': 'Quelora-Seeder/2.12' }, timeout: TIMEOUT_MS });
-        const $ = cheerio.load(data);
-        
-        // 1. Buscar descripción en meta tags (preferido)
-        let description = $('meta[name="description"]').attr('content') 
-                        || $('meta[property="og:description"]').attr('content') 
-                        || '';
-        
-        // 2. Si no hay meta description, intentar obtener el primer párrafo (general)
-        if (!description) {
-            const firstParagraph = $('p').first().text();
-            if (firstParagraph && firstParagraph.length > 50) {
-                description = firstParagraph.substring(0, 300) + '...'; // Limitar a 300 caracteres
-                console.log('          Descripción obtenida del primer párrafo.');
-            }
-        }
-
-        // 3. Buscar imagen (sin cambios)
-        let image = $('meta[property="og:image"]').attr('content') || $('article img').first().attr('src') || null;
-        if (image && !image.startsWith('http')) image = new URL(image, new URL(url).origin).href;
-        
-        return { description: decodeHtmlEntities(description), image: decodeHtmlEntities(image) };
-    } catch (error) {
-        console.error(`⚠️ Error scraping ${url}: ${error.message}`);
-        return { description: '', image: null };
-    }
-}
-// ... (Funciones de actualización en lote y simulación de petición sin cambios) ...
-
 function accumulateProfileChanges(profileId, changes) {
     const current = profileUpdatesMap.get(profileId.toString()) || { comments: 0, likes: 0 };
     profileUpdatesMap.set(profileId.toString(), {
@@ -163,7 +126,8 @@ function accumulateProfileChanges(profileId, changes) {
 
 async function bulkUpdateProfileCounters() {
     if (profileUpdatesMap.size === 0) return;
-
+    
+    // ... (Lógica de bulkUpdateProfileCounters sin cambios) ...
     console.log(`⏳ Iniciando actualización en lote para ${profileUpdatesMap.size} perfiles...`);
     const bulkOps = [];
     
@@ -192,6 +156,9 @@ async function bulkUpdateProfileCounters() {
     }
 }
 
+/**
+ * 🛠️ CORRECCIÓN: clientRegion usa geo.region para la simulación de GeoStats.
+ */
 function simulateRequestFromProfile(profile) {
     const geo = profile.location;
 
@@ -207,7 +174,7 @@ function simulateRequestFromProfile(profile) {
         
         clientCountry: geo.country || '', 
         clientCountryCode: geo.countryCode || '',
-        clientRegion: geo.city || '',
+        clientRegion: geo.region || '', 
         clientRegionCode: geo.regionCode || '',
         clientCity: geo.city || '',
         clientLatitude: geo.coordinates[1],
@@ -217,12 +184,10 @@ function simulateRequestFromProfile(profile) {
     };
 }
 
-// --- LÓGICA PRINCIPAL DE SEEDING (Modificaciones en fetchRedditData y createOrFindPost) ---
+// --- LÓGICA PRINCIPAL DE SEEDING (Simplificada) ---
 
 /**
- * 🆕 MODIFICACIÓN CLAVE: Se separa la URL externa del permalink de Reddit.
- * También se utiliza el valor de post.url (que es la URL externa para Link Posts)
- * para realizar el scraping condicionalmente.
+ * 🛠️ SIMPLIFICADO: Solo obtiene el JSON de comentarios. La lógica del post fue movida.
  */
 async function fetchRedditData(threadUrl, limit = 1000) {
     const threadMatch = threadUrl.match(/comments\/([a-z0-9]+)/i);
@@ -230,47 +195,17 @@ async function fetchRedditData(threadUrl, limit = 1000) {
     const threadId = threadMatch[1];
     const subreddit = threadUrl.split('/r/')[1].split('/')[0];
     const apiUrl = `https://oauth.reddit.com/r/${subreddit}/comments/${threadId}.json?limit=${limit}&threaded=true&sort=top`;
-    console.log(`📡 Obteniendo datos iniciales de: ${apiUrl}`);
+    console.log(`📡 Obteniendo datos de comentarios de: ${apiUrl}`);
     const [postData, commentsData] = await makeAuthenticatedRedditRequest(apiUrl);
     
     const post = postData.data.children[0].data;
     
-    // 1. Definir las URLs
-    const redditPermalink = `https://reddit.com${post.permalink}`;
-    const externalUrl = (post.is_self || !post.url || post.url.includes(redditPermalink)) ? null : post.url;
-    
-    let imageUrl = null;
-    let description = post.selftext || ''; // Inicialmente, usa el texto del post si es un self-post
-
-    // 2. Procesamiento de URLs (Imágenes y Scraping de Descripción/Imagen)
-    if (post.preview?.images?.[0]) {
-        imageUrl = decodeHtmlEntities(post.preview.images[0].source.url);
-    } else if (post.url && /\.(jpg|png|gif)$/.test(post.url)) {
-        imageUrl = decodeHtmlEntities(post.url);
-    } else if (post.url_overridden_by_dest && /\.(jpg|png|gif)$/.test(post.url_overridden_by_dest)) {
-        imageUrl = decodeHtmlEntities(post.url_overridden_by_dest);
-    }
-
-    // 3. SCRAPING para descripción si es un Link Post que no es una imagen
-    if (externalUrl && !imageUrl) {
-        const scrapedData = await scrapeWebpage(externalUrl);
-        description = scrapedData.description || description; // Priorizar la descripción scrapeada
-        if (!imageUrl) imageUrl = scrapedData.image || null;
-    } else if (externalUrl && imageUrl) {
-        // A veces el post de Reddit no tiene descripción, pero tiene una imagen
-        console.log(`🖼️ Es un post de imagen. No se intenta obtener la descripción externa.`);
-    }
-
     return {
         post: {
-            title: post.title, description, upvotes: post.ups, comments: post.num_comments,
+            title: post.title,
+            upvotes: post.ups,
+            comments: post.num_comments,
             created: post.created_utc, 
-            
-            // 🆕 La URL que se guarda en LINK y REFERENCE
-            url: externalUrl || redditPermalink, 
-            
-            reddit_url: redditPermalink, // URL de Reddit (para metadatos internos si es necesario)
-            image: imageUrl,
         },
         comments: commentsData.data.children.filter(c => c.kind === 't1'),
         moreComments: commentsData.data.children.filter(c => c.kind === 'more').flatMap(more => more.data.children)
@@ -278,7 +213,6 @@ async function fetchRedditData(threadUrl, limit = 1000) {
 }
 
 async function fetchMoreComments(threadId, childrenIds) {
-// ... (sin cambios) ...
     try {
         console.log(`📡 Obteniendo lote de ${childrenIds.length} comentarios adicionales...`);
         const data = new URLSearchParams({ api_type: 'json', children: childrenIds.join(','), link_id: `t3_${threadId}`, sort: 'top' });
@@ -291,43 +225,21 @@ async function fetchMoreComments(threadId, childrenIds) {
 }
 
 /**
- * 🆕 MODIFICACIÓN CLAVE: Utiliza 'redditData.post.url' para 'link' y 'reference',
- * que ahora contiene la URL externa (si existe).
+ * 🛠️ SIMPLIFICADO: Solo encuentra el Post existente.
  */
 async function createOrFindPost(redditData, entityId, moreComments) {
     let post = await Post.findOne({ entity: entityId }).maxTimeMS(TIMEOUT_MS);
-    if (post) {
-        console.log(`✅ Post existente encontrado: ${post._id}`);
-        if (post.moreCommentsRef.length === 0 && moreComments.length > 0) {
-            post.moreCommentsRef = moreComments;
-            await post.save();
-        }
-        return post;
+    if (!post) {
+        throw new Error(`❌ Post con entity ${entityId} no encontrado. Ejecute SeedRedditThread.js primero.`);
+    }
+
+    console.log(`✅ Post existente encontrado: ${post._id}`);
+    if (post.moreCommentsRef.length === 0 && moreComments.length > 0) {
+        post.moreCommentsRef = moreComments;
+        await post.save();
     }
-    const postData = {
-        cid: process.env.CID || 'QU-ME7HF2BN-E8QD9', entity: entityId, 
-        
-        // 🆕 Se usa la URL que ahora es la externa (si está disponible)
-        reference: redditData.post.url, 
-        title: redditData.post.title.substring(0, 100), 
-        description: redditData.post.description, // Descripción obtenida del scraping
-        type: 'reddit_crosspost', 
-        link: redditData.post.url, // 🆕 Se usa la URL que ahora es la externa (si está disponible)
-        
-        image: redditData.post.image,
-        likes: [], likesCount: redditData.post.upvotes || 0, commentCount: redditData.post.comments || 0,
-        viewsCount: Math.floor((redditData.post.upvotes || 0) * 15),
-        created_at: new Date(redditData.post.created * 1000), updated_at: new Date(redditData.post.created * 1000),
-        moreCommentsRef: moreComments
-    };
-    post = new Post(postData);
-    await post.save();
-    console.log(`✅ Post creado: ${post._id}`);
     return post;
 }
-
-// ... (El resto del script, incluyendo getOrCreateProfile, processCommentsRecursively y seedRedditThread, sigue igual) ...
-
 
 async function getOrCreateProfile(redditAuthor) {
     if (authorToNameMap.has(redditAuthor)) {
@@ -490,20 +402,15 @@ async function seedRedditThread() {
 
         const entityId = REDDIT_THREAD_ENTITY;
         const threadId = REDDIT_THREAD_URL.match(/comments\/([a-z0-9]+)/i)[1];
-        let post = await Post.findOne({ entity: entityId });
-
+        
+        // 🛠️ SOLO OBTENEMOS EL JSON DE COMENTARIOS
+        const redditData = await fetchRedditData(REDDIT_THREAD_URL, REDDIT_LIMIT);
+        
+        // 🛠️ BUSCAMOS EL POST EXISTENTE (creado por SeedRedditThread.js)
+        let post = await createOrFindPost(redditData, entityId, redditData.moreComments);
+        
         if (!post?.metadata?.imported_comments) {
-            console.log("⏳ Realizando importación inicial...");
-            const redditData = await fetchRedditData(REDDIT_THREAD_URL, REDDIT_LIMIT);
-            
-            // ⚠️ Validación para confirmar que se ha obtenido un link de referencia
-            if (!redditData.post.url || redditData.post.url.includes('reddit.com')) {
-                console.warn('⚠️ No se pudo obtener una URL de referencia externa válida. Se utilizará el permalink de Reddit.');
-            } else {
-                console.log(`🔗 URL Externa identificada y scrapeada: ${redditData.post.url}`);
-            }
-                
-            post = await createOrFindPost(redditData, entityId, redditData.moreComments);
+            console.log("⏳ Realizando importación inicial de comentarios...");
             
             const { count, moreIds } = await processCommentsRecursively(redditData.comments, post._id, entityId, allProfiles, null);
             
@@ -551,5 +458,5 @@ async function seedRedditThread() {
     }
 }
 
-console.log('🚀 Iniciando seedRedditThread (versión 2.12)...');
+console.log('🚀 Iniciando seedRedditThread (versión 2.16)...');
 seedRedditThread();

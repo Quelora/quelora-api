@@ -1,7 +1,7 @@
-// SeedRedditThread.js - Versión con sistema de likes (MODIFICADA: Incluye registro de actividad en Redis Y modo programado)
+// SeedRedditThread.js - Versión 2.16 (CORRECCIÓN: Centraliza Scrapeo de Link/Descripción en Post Seeder)
 // USO: node SeedRedditThread.js
 // USO PROGRAMADO: node SeedRedditThread.js --scheduled
-// 
+
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
 const connectDB = require('../db');
@@ -9,8 +9,9 @@ const Post = require('../models/Post');
 const Profile = require('../models/Profile');
 const ProfileLike = require('../models/ProfileLike');
 const axios = require('axios');
+const cheerio = require('cheerio');
 const crypto = require('crypto');
-const { recordActivityHit } = require('../utils/recordStatsActivity'); // Asumiendo la ruta correcta
+const { recordActivityHit } = require('../utils/recordStatsActivity'); 
 
 const REDDIT_CLIENT_ID = process.env.REDDIT_CLIENT_ID;
 const REDDIT_CLIENT_SECRET = process.env.REDDIT_CLIENT_SECRET;
@@ -35,9 +36,70 @@ const TECH_SUBREDDITS = [
 
 let accessToken = null;
 
+// --- FUNCIONES DE SCRAPING (NUEVAS / MOVIDAS) ---
+
+const decodeHtmlEntities = (str) => str ? str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') : str;
+
 /**
- * Acumula los incrementos en memoria para realizar una actualización eficiente en lote al final.
- */
+ * 🆕 NUEVA FUNCIÓN: Raspa el HTML del permalink de Reddit para encontrar la URL externa.
+ */
+async function scrapeRedditForExternalLink(redditPermalink) {
+    try {
+        console.log(`🔎 Scrapeando HTML de Reddit para link externo: ${redditPermalink}`);
+        const { data } = await axios.get(redditPermalink, { headers: { 'User-Agent': 'TechPosts-Importer/2.16' }, timeout: TIMEOUT_MS });
+        const $ = cheerio.load(data);
+        
+        // Selector basado en la estructura de 'faceplate-tracker'
+        const selector = 'faceplate-tracker a[target="_blank"][rel*="noopener"][rel*="nofollow"][class*="border-solid"]';
+
+        const externalAnchor = $(selector).first();
+        
+        if (externalAnchor.length > 0) {
+            const externalHref = externalAnchor.attr('href');
+            console.log(`✅ Link externo encontrado en el HTML de Reddit: ${externalHref}`);
+            return externalHref;
+        }
+
+        return null;
+    } catch (error) {
+        console.error(`❌ Error al intentar scrapear el permalink de Reddit: ${error.message}`);
+        return null;
+    }
+}
+
+
+/**
+ * 🆕 FUNCIÓN MOVIDA/MEJORADA: Implementación de scraping de la URL de destino para la descripción.
+ */
+async function scrapeWebpage(url) {
+    try {
+        console.log(`🌍 Intentando scrapeo de la descripción de: ${url}`);
+        const { data } = await axios.get(url, { headers: { 'User-Agent': 'TechPosts-Importer/2.16' }, timeout: TIMEOUT_MS });
+        const $ = cheerio.load(data);
+        
+        // 1. Buscar descripción en meta tags (preferido)
+        let description = $('meta[name="description"]').attr('content') 
+                        || $('meta[property="og:description"]').attr('content') 
+                        || '';
+        
+        // 2. Si no hay meta description, intentar obtener el primer párrafo (general)
+        if (!description) {
+            const firstParagraph = $('p').first().text();
+            if (firstParagraph && firstParagraph.length > 50) {
+                description = firstParagraph.substring(0, 300) + '...'; // Limitar a 300 caracteres
+            }
+        }
+
+        return decodeHtmlEntities(description) || '';
+    } catch (error) {
+        console.error(`⚠️ Error scraping descripción de ${url}: ${error.message}`);
+        return '';
+    }
+}
+
+
+// --- FUNCIONES DE BATCHING Y REDDIT API (User-Agent actualizado) ---
+
 function accumulateProfileChanges(profileId, changes) {
     const current = profileUpdatesMap.get(profileId.toString()) || { likes: 0 };
     profileUpdatesMap.set(profileId.toString(), {
@@ -45,9 +107,6 @@ function accumulateProfileChanges(profileId, changes) {
     });
 }
 
-/**
- * Realiza la actualización final en lote de los contadores de perfiles usando $inc.
- */
 async function bulkUpdateProfileCounters() {
     if (profileUpdatesMap.size === 0) return;
 
@@ -78,9 +137,6 @@ async function bulkUpdateProfileCounters() {
     }
 }
 
-/**
- * Obtiene token de acceso OAuth2 de Reddit
- */
 async function getRedditAccessToken() {
     try {
         console.log('🔑 Obteniendo token de acceso de Reddit...');
@@ -90,7 +146,7 @@ async function getRedditAccessToken() {
                 headers: {
                     'Authorization': `Basic ${auth}`,
                     'Content-Type': 'application/x-www-form-urlencoded',
-                    'User-Agent': 'TechPosts-Importer/1.0'
+                    'User-Agent': 'TechPosts-Importer/2.16'
                 },
                 timeout: 10000
             }
@@ -104,9 +160,6 @@ async function getRedditAccessToken() {
     }
 }
 
-/**
- * Realiza solicitud autenticada a Reddit API
- */
 async function makeRedditRequest(url) {
     if (!accessToken) {
         await getRedditAccessToken();
@@ -116,7 +169,7 @@ async function makeRedditRequest(url) {
         const response = await axios.get(url, {
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
-                'User-Agent': 'TechPosts-Importer/1.0'
+                'User-Agent': 'TechPosts-Importer/2.16'
             },
             timeout: 15000
         });
@@ -141,7 +194,6 @@ async function fetchTechPostsWithComments() {
         
         let allPosts = [];
         
-        // Buscar en cada subreddit de tecnología
         for (const subreddit of TECH_SUBREDDITS) {
             try {
                 console.log(`🔍 Escaneando r/${subreddit}...`);
@@ -149,8 +201,8 @@ async function fetchTechPostsWithComments() {
                 const data = await makeRedditRequest(url);
                 
                 const posts = data.data.children
-                    .filter(post => post.data.num_comments >= MIN_COMMENTS) // Filtro por comentarios
-                    .filter(post => !post.data.over_18) // Excluir NSFW
+                    .filter(post => post.data.num_comments >= MIN_COMMENTS) 
+                    .filter(post => !post.data.over_18) 
                     .map(post => ({
                         id: post.data.id,
                         title: post.data.title,
@@ -159,7 +211,8 @@ async function fetchTechPostsWithComments() {
                         upvotes: post.data.ups,
                         comments: post.data.num_comments,
                         created: post.data.created_utc,
-                        url: `https://reddit.com${post.data.permalink}`,
+                        url: `https://reddit.com${post.data.permalink}`, // Permalink de Reddit
+                        external_link_api: post.data.url, // URL que la API devuelve (puede ser externa o Reddit)
                         image: getPostImage(post.data),
                         video: getPostVideo(post.data),
                         gallery: getPostGallery(post.data),
@@ -171,7 +224,6 @@ async function fetchTechPostsWithComments() {
                 console.log(`✅ r/${subreddit}: ${posts.length} posts con ≥ ${MIN_COMMENTS} comentarios`);
                 allPosts = allPosts.concat(posts);
                 
-                // Pequeña pausa entre requests
                 await new Promise(resolve => setTimeout(resolve, 500));
                 
             } catch (error) {
@@ -180,13 +232,12 @@ async function fetchTechPostsWithComments() {
             }
         }
         
-        // Eliminar duplicados por URL y ordenar por comentarios (descendente)
         const uniquePosts = allPosts.filter((post, index, self) => 
             index === self.findIndex(p => p.url === post.url)
         ).sort((a, b) => b.comments - a.comments);
         
         console.log(`🎯 Total posts únicos encontrados: ${uniquePosts.length} (≥ ${MIN_COMMENTS} comentarios)`);
-        return uniquePosts.slice(0, POST_LIMIT); // Limitar resultado
+        return uniquePosts.slice(0, POST_LIMIT); 
         
     } catch (error) {
         console.error('❌ Error obteniendo posts de tecnología:', error.message);
@@ -194,28 +245,19 @@ async function fetchTechPostsWithComments() {
     }
 }
 
-/**
- * Extrae imagen del post si existe
- */
 function getPostImage(postData) {
-    // Imagen desde preview
     if (postData.preview && postData.preview.images && postData.preview.images.length > 0) {
         return postData.preview.images[0].source.url.replace(/&amp;/g, '&');
     }
     
-    // Imagen directa desde URL
     if (postData.url && (
-        postData.url.endsWith('.jpg') || 
-        postData.url.endsWith('.jpeg') ||
-        postData.url.endsWith('.png') ||
-        postData.url.endsWith('.gif') ||
-        postData.url.includes('imgur.com') ||
-        postData.url.includes('i.redd.it')
+        postData.url.endsWith('.jpg') || postData.url.endsWith('.jpeg') ||
+        postData.url.endsWith('.png') || postData.url.endsWith('.gif') ||
+        postData.url.includes('imgur.com') || postData.url.includes('i.redd.it')
     )) {
         return postData.url;
     }
     
-    // Thumbnail
     if (postData.thumbnail && postData.thumbnail.startsWith('http')) {
         return postData.thumbnail;
     }
@@ -223,23 +265,16 @@ function getPostImage(postData) {
     return null;
 }
 
-/**
- * Extrae video del post si existe
- */
 function getPostVideo(postData) {
     if (postData.media && postData.media.reddit_video) {
         return postData.media.reddit_video.fallback_url;
     }
     
     if (postData.url && (
-        postData.url.includes('youtube.com') ||
-        postData.url.includes('youtu.be') ||
-        postData.url.includes('vimeo.com') ||
-        postData.url.includes('twitch.tv') ||
-        postData.url.endsWith('.mp4') ||
-        postData.url.endsWith('.webm') ||
-        postData.url.includes('gfycat.com') ||
-        postData.url.includes('redgifs.com')
+        postData.url.includes('youtube.com') || postData.url.includes('youtu.be') ||
+        postData.url.includes('vimeo.com') || postData.url.includes('twitch.tv') ||
+        postData.url.endsWith('.mp4') || postData.url.endsWith('.webm') ||
+        postData.url.includes('gfycat.com') || postData.url.includes('redgifs.com')
     )) {
         return postData.url;
     }
@@ -247,9 +282,6 @@ function getPostVideo(postData) {
     return null;
 }
 
-/**
- * Extrae galería de imágenes si existe
- */
 function getPostGallery(postData) {
     if (postData.is_gallery && postData.media_metadata) {
         const galleryImages = [];
@@ -263,9 +295,6 @@ function getPostGallery(postData) {
     return null;
 }
 
-/**
- * Extrae cualquier tipo de medio disponible
- */
 function getPostMedia(postData) {
     return {
         image: getPostImage(postData),
@@ -274,16 +303,10 @@ function getPostMedia(postData) {
     };
 }
 
-/**
- * Verifica si el post tiene al menos un elemento multimedia
- */
 function hasMediaContent(postData) {
     return !!(postData.image || postData.video || postData.gallery);
 }
 
-/**
- * Obtiene la URL principal del medio para el post
- */
 function getPrimaryMediaUrl(postData) {
     if (postData.video) return postData.video;
     if (postData.image) return postData.image;
@@ -291,9 +314,6 @@ function getPrimaryMediaUrl(postData) {
     return null;
 }
 
-/**
- * Genera entity ID único basado en URL de Reddit
- */
 function generateEntityId(redditUrl) {
     return crypto.createHash('sha256')
         .update(redditUrl)
@@ -301,24 +321,17 @@ function generateEntityId(redditUrl) {
         .substring(0, 24);
 }
 
-/**
- * Verifica si el post ya existe en la base de datos
- */
 async function postExists(entityId) {
     const existing = await Post.findOne({ entity: entityId });
     return !!existing;
 }
 
-/**
- * Simula likes para un post usando perfiles existentes
- */
 async function simulatePostLikes(postId, likesCount, allProfileIds) {
     if (likesCount <= 0 || allProfileIds.length === 0) {
         return [];
     }
 
     try {
-        // Mapeamos los IDs de MongoDB a sus autores (hashes) para los likers
         const profileIdToAuthorMap = new Map(allProfileIds.map(p => [p._id.toString(), p.author]));
         
         const shuffledLikerPool = [...allProfileIds].sort(() => 0.5 - Math.random());
@@ -335,20 +348,15 @@ async function simulatePostLikes(postId, likesCount, allProfileIds) {
             await ProfileLike.insertMany(profileLikeDocs);
             console.log(`❤️  ${profileLikeDocs.length} likes simulados para el post ${postId}`);
             
-            // --- REGISTRO DE ACTIVIDAD DE LIKES (NUEVO) ---
             await recordActivityHit(`activity:likes:${process.env.CID}`, 'added', profileLikeDocs.length);
-            // ---------------------------------------------
             
-            // OBTENEMOS EL CAMPO 'author' (HASH) para el array de likes
             const likerAuthors = selectedLikers.map(l => profileIdToAuthorMap.get(l._id.toString()) || l.author);
             
-            // SE AÑADEN AL ARRAY DE LIKES DEL POST USANDO EL HASH DEL AUTOR
             await Post.findByIdAndUpdate(postId, {
                 $push: { likes: { $each: likerAuthors, $slice: -200 } }
             });
             console.log(`✍️  Añadidos ${likerAuthors.length} autores (hashes) al array de likes del post.`);
 
-            // Acumular conteo de likes para cada votante
             for (const liker of selectedLikers) {
                 accumulateProfileChanges(liker._id, { likes: 1 });
             }
@@ -363,21 +371,40 @@ async function simulatePostLikes(postId, likesCount, allProfileIds) {
     }
 }
 
-/**
- * Importa un post a la base de datos SOLO si tiene contenido multimedia
- */
 async function importPost(postData, allProfileIds) {
-    // Verificar que el post tenga al menos un elemento multimedia
-    if (!hasMediaContent(postData)) {
-        console.log(`❌ Post sin multimedia - SKIPPED: r/${postData.subreddit} - ${postData.title.substring(0, 60)}...`);
-        return { skipped: true, reason: 'no_media' };
-    }
-    
     const entityId = generateEntityId(postData.url);
     
     if (await postExists(entityId)) {
         console.log(`⏩ Post ya existe: r/${postData.subreddit} - ${postData.title.substring(0, 60)}...`);
         return { skipped: true, reason: 'exists' };
+    }
+    
+    // 1. DETERMINAR URL FINAL Y BUSCAR DESCRIPCIÓN
+    let finalLink = postData.external_link_api;
+    let description = postData.description; // Selftext o vacío
+    
+    // Si la URL de la API es el permalink de Reddit (o no es obvia), raspamos el HTML
+    if (!finalLink || finalLink.includes('reddit.com')) {
+        const scrapedLink = await scrapeRedditForExternalLink(postData.url); // postData.url es el permalink de Reddit
+        if (scrapedLink) {
+            finalLink = scrapedLink;
+        } else {
+            // Si el scraping HTML falla, usamos el permalink de Reddit como link final (fallback)
+            finalLink = postData.url; 
+        }
+    }
+
+    // 2. SCRAPING de la página final para obtener la descripción si no es selftext
+    if (!postData.description && finalLink && !finalLink.includes('reddit.com')) {
+        const scrapedDescription = await scrapeWebpage(finalLink);
+        description = scrapedDescription || description; 
+    }
+
+    // 3. Control de contenido para posts sin media
+    // Solo permitimos posts que tienen media O que tienen un link externo útil
+    if (!hasMediaContent(postData) && finalLink.includes('reddit.com')) {
+        console.log(`❌ Post sin multimedia Y sin link externo - SKIPPED: r/${postData.subreddit} - ${postData.title.substring(0, 60)}...`);
+        return { skipped: true, reason: 'no_media' };
     }
     
     try {
@@ -386,16 +413,16 @@ async function importPost(postData, allProfileIds) {
         const post = new Post({
             cid: process.env.CID || 'QU-ME7HF2BN-E8QD9',
             entity: entityId,
-            reference: postData.url,
+            reference: finalLink, // URL FINAL DEL ARTÍCULO
             title: postData.title.substring(0, 100),
-            description: postData.description.substring(0, 200) || '',
+            description: description.substring(0, 200) || '', // Descripción scrapeada/selftext
             type: 'reddit_tech',
-            link: postData.url,
-            image: primaryMedia, // Usar el medio principal
-            media: postData.media, // Guardar todos los medios disponibles
+            link: finalLink, // URL FINAL DEL ARTÍCULO
+            image: primaryMedia, 
+            media: postData.media, 
             likesCount: postData.upvotes,
             commentCount: postData.comments,
-            viewsCount: 0, // Sin simulación
+            viewsCount: 0, 
             created_at: new Date(postData.created * 1000),
             updated_at: new Date(postData.created * 1000),
             metadata: {
@@ -404,6 +431,7 @@ async function importPost(postData, allProfileIds) {
                 nsfw: postData.nsfw,
                 original_comments: postData.comments,
                 imported_comments: false,
+                reddit_permalink: postData.url, // Guardamos el permalink de Reddit como metadata
                 has_image: !!postData.image,
                 has_video: !!postData.video,
                 has_gallery: !!postData.gallery,
@@ -412,9 +440,8 @@ async function importPost(postData, allProfileIds) {
         });
         
         await post.save();
-        console.log(`✅ Post importado: r/${postData.subreddit} (${postData.comments} comentarios, ${getMediaType(postData)}) - ${postData.title.substring(0, 50)}...`);
+        console.log(`✅ Post importado: r/${postData.subreddit} (Link: ${finalLink.substring(0, 40)}...)`);
         
-        // SIMULAR LIKES PARA EL POST (misma lógica que en comentarios)
         if (postData.upvotes > 0 && allProfileIds.length > 0) {
             await simulatePostLikes(post._id, postData.upvotes, allProfileIds);
         }
@@ -426,9 +453,6 @@ async function importPost(postData, allProfileIds) {
     }
 }
 
-/**
- * Obtiene el tipo de medio para logging
- */
 function getMediaType(postData) {
     if (postData.video) return 'video';
     if (postData.gallery) return `gallery(${postData.gallery.length} images)`;
@@ -436,9 +460,6 @@ function getMediaType(postData) {
     return 'no media';
 }
 
-/**
- * Función principal del proceso de importación
- */
 async function runImportProcess() {
     let exitCode = 0;
     try {
@@ -449,25 +470,17 @@ async function runImportProcess() {
         await connectDB();
         console.log('✅ Conectado a la base de datos');
         
-        // Obtener perfiles existentes para simulación de likes
         console.log('👤 Obteniendo IDs y Autores de perfiles para simulación de likes...');
         const allProfileIds = await Profile.find({}, '_id author').lean(); 
         console.log(`👍 Encontrados ${allProfileIds.length} perfiles para usar como votantes.`);
         
         const techPosts = await fetchTechPostsWithComments();
         
-        console.log(`\n📥 Filtrando posts con contenido multimedia...`);
+        console.log(`\n📥 Analizando y filtrando posts para importar...`);
         
-        const postsWithMedia = techPosts.filter(hasMediaContent);
-        
-        console.log(`📊 Estadísticas de contenido multimedia:`);
-        console.log(`   📈 Total posts encontrados: ${techPosts.length}`);
-        console.log(`   🖼️  Posts con multimedia: ${postsWithMedia.length}`);
-        
-        console.log(`\n📥 Importando ${postsWithMedia.length} posts con contenido multimedia...`);
         let imported = 0;
-        let skipped = 0;
-        let noMediaSkipped = 0;
+        let skippedExists = 0;
+        let skippedNoMedia = 0;
         let errors = 0;
         
         for (const post of techPosts) {
@@ -475,9 +488,9 @@ async function runImportProcess() {
             
             if (result.skipped) {
                 if (result.reason === 'no_media') {
-                    noMediaSkipped++;
+                    skippedNoMedia++;
                 } else {
-                    skipped++;
+                    skippedExists++;
                 }
             } else if (result.success) {
                 imported++;
@@ -485,21 +498,17 @@ async function runImportProcess() {
                 errors++;
             }
             
-            // Pausa para no saturar la API
             await new Promise(resolve => setTimeout(resolve, 200));
         }
         
-        // --- PASO CLAVE: ACTUALIZACIÓN FINAL DE CONTADORES ---
         await bulkUpdateProfileCounters(); 
-        // ---------------------------------------------------
         
         console.log(`\n🎉 Importación completada:`);
-        console.log(`   ✅ Nuevos posts con multimedia: ${imported}`);
-        console.log(`   ⏩ Ya existían: ${skipped}`);
-        console.log(`   🚫 Sin multimedia (omitidos): ${noMediaSkipped}`);
+        console.log(`   ✅ Nuevos posts: ${imported}`);
+        console.log(`   ⏩ Ya existían: ${skippedExists}`);
+        console.log(`   🚫 Sin link útil/media (omitidos): ${skippedNoMedia}`);
         console.log(`   ❌ Errores: ${errors}`);
         console.log(`   📊 Total analizados: ${techPosts.length}`);
-        console.log(`   🔧 Subreddits monitoreados: ${TECH_SUBREDDITS.length}`);
         
     } catch (error) {
         console.error('❌ Error en importación:', error.message);
@@ -511,10 +520,6 @@ async function runImportProcess() {
     }
 }
 
-
-/**
- * Función principal para ejecución manual
- */
 async function main() {
     console.log('🚀 Iniciando importación de posts de tecnología...');
     console.log(`⏰ Hora de inicio: ${new Date().toISOString()}`);
@@ -525,36 +530,29 @@ async function main() {
     process.exit(exitCode);
 }
 
-/**
- * Función para ejecución programada (cada 1 hora)
- */
 async function scheduledExecution() {
-    const INTERVAL_MS = 60 * 60 * 1000; // 1 hora
+    const INTERVAL_MS = 60 * 60 * 1000; 
     console.log(`\n⏰ Iniciando ciclo de ejecución programada (cada ${INTERVAL_MS / 1000 / 60} minutos)...`);
 
     const executeCycle = async () => {
         console.log(`\n--- Ejecución de importación de posts ---`);
         console.log(`⏰ Hora de inicio: ${new Date().toISOString()}`);
         
-        await runImportProcess();
+        const exitCode = await runImportProcess(); 
         
         const nextRun = new Date(Date.now() + INTERVAL_MS);
         console.log(`⏭️  Próxima ejecución: ${nextRun.toISOString()}`);
         
-        // Programar siguiente ejecución
         setTimeout(executeCycle, INTERVAL_MS);
     };
     
     executeCycle();
 }
 
-
-// Ejecutar según el modo
 if (require.main === module) {
     if (process.argv.includes('--scheduled')) {
         scheduledExecution();
     } else {
-        // Ejecución única
         main().catch(console.error);
     }
 }
