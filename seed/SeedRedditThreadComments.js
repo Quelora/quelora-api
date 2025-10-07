@@ -1,5 +1,5 @@
-// SeedRedditThreadComments.js - Versión 2.16 (CORRECCIÓN FINAL: Seguridad de URL)
-// USO: CID="QU-ME7HF2BN-E8QD9" REDDIT_URL="https://www.reddit.com/r/Android/comments/1nr65np/android_will_soon_run_linux_apps_better_by_adding/" node SeedRedditThreadComments.js
+// SeedRedditThreadComments.js - Versión 2.16 (CORRECCIÓN FINAL: Seguridad de URL + Separación de CITIES)
+// USO: CID="QU-ME7HF2BN-E8QD9" REDDIT_URL="https://www.reddit.com/r/Android/comments/1nr65np/android_will-soon-run-linux_apps_better_by-adding/" node SeedRedditThreadComments.js
 
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
@@ -13,6 +13,9 @@ const crypto = require('crypto');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { recordGeoActivity, recordActivityHit } = require('../utils/recordStatsActivity'); 
+
+// 🆕 Importar CITIES desde el archivo de configuración externo
+const { CITIES } = require('./config/geoData');
 
 const REDDIT_THREAD_ENTITY  = process.env.REDDIT_ENTITY;
 const REDDIT_THREAD_URL = process.env.REDDIT_URL;
@@ -30,16 +33,6 @@ const profileUpdatesMap = new Map();
 const TIMEOUT_MS = 25000;
 const MORE_COMMENTS_BATCH_SIZE = 100;
 // -----------------------------------------------------------
-
-// Datos para perfiles sintéticos (sin cambios)
-const CITIES = [
-    { name: "New York", coords: [-74.0060, 40.7128], country: "United States", countryCode: "US", region: "New York", regionCode: "NY" },
-    { name: "Los Angeles", coords: [-118.2437, 34.0522], country: "United States", countryCode: "US", region: "California", regionCode: "CA" },
-    { name: "Chicago", coords: [-87.6298, 41.8781], country: "United States", countryCode: "US", region: "Illinois", regionCode: "IL" },
-    { name: "London", coords: [-0.1278, 51.5074], country: "United Kingdom", countryCode: "GB", region: "England", regionCode: "ENG" },
-    { name: "Berlin", coords: [13.4050, 52.5200], country: "Germany", countryCode: "DE", region: "Berlin", regionCode: "BE" },
-    { name: "Tokyo", coords: [139.6917, 35.6895], country: "Japan", countryCode: "JP", region: "Tokyo", regionCode: "TKY" }
-];
 
 let accessToken = null;
 
@@ -156,57 +149,58 @@ async function bulkUpdateProfileCounters() {
 }
 
 /**
- * 🛠️ Corregido: clientRegion usa geo.region.
+ * 🛠️ Corregido: La IP simulada ahora se intenta tomar del objeto Profile.
  */
 function simulateRequestFromProfile(profile) {
-    const geo = profile.location;
+    const geo = profile.location;
 
-    if (!profile || !geo || !profile.cid || !geo.coordinates || geo.coordinates.length < 2) {
-        const cid = profile?.cid || process.env.CID || 'N/A';
-        console.warn(`⚠️ Perfil incompleto para GeoStats (CID: ${cid}).`);
-        return null; 
-    }
-    
-    return {
-        cid: profile.cid,
-        clientIp: `192.0.2.${Math.floor(Math.random() * 255)}`, // IP simple de simulación
-        
-        clientCountry: geo.country || '', 
-        clientCountryCode: geo.countryCode || '',
-        clientRegion: geo.region || '', 
-        clientRegionCode: geo.regionCode || '',
-        clientCity: geo.city || '',
-        clientLatitude: geo.coordinates[1],
-        clientLongitude: geo.coordinates[0],
-        
-        geoData: null 
-    };
-}
-
-/**
- * 🆕 FUNCIÓN DE SEGURIDAD: Extrae el threadId de la URL de Reddit de forma segura.
- * (Corrige el TypeError: Cannot read properties of null (reading '1'))
- */
-function findRedditThreadId(url) {
-    const threadMatch = url.match(/comments\/([a-z0-9]+)/i);
-    if (!threadMatch || !threadMatch[1]) {
+    if (!profile || !geo || !profile.cid || !geo.coordinates || geo.coordinates.length < 2) {
+        const cid = profile?.cid || process.env.CID || 'N/A';
+        console.warn(`⚠️ Perfil incompleto para GeoStats (CID: ${cid}).`);
         return null;
     }
-    return threadMatch[1];
+
+    const clientIp = profile.simulatedIp || `192.0.2.${Math.floor(Math.random() * 255)}`;
+
+    return {
+        cid: profile.cid,
+        clientIp: clientIp, // IP simulada o generada
+        
+        clientCountry: geo.country || '',
+        clientCountryCode: geo.countryCode || '',
+        clientRegion: geo.region || '',
+        clientRegionCode: geo.regionCode || '',
+        clientCity: geo.city || '',
+        clientLatitude: geo.coordinates[1],
+        clientLongitude: geo.coordinates[0],
+        
+        geoData: null
+    };
+}
+
+
+/**
+ * 🆕 FUNCIÓN DE SEGURIDAD: Extrae el threadId de la URL de Reddit de forma segura.
+ */
+function findRedditThreadId(url) {
+    const threadMatch = url.match(/comments\/([a-z0-9]+)/i);
+    if (!threadMatch || !threadMatch[1]) {
+        return null;
+    }
+    return threadMatch[1];
 }
 
 
 // --- LÓGICA PRINCIPAL DE SEEDING (Simplificada) ---
 
 /**
- * SIMPLIFICADO: Solo obtiene el JSON de comentarios. La lógica del post fue movida.
- */
+ * SIMPLIFICADO: Solo obtiene el JSON de comentarios.
+ */
 async function fetchRedditData(threadUrl, limit = 1000) {
-    // Utilizamos la función de seguridad aquí. Si falla, el caller lo maneja.
-    const threadId = findRedditThreadId(threadUrl);
-    if (!threadId) {
-        throw new Error(`❌ URL de Reddit inválida. No se encontró el ID del hilo en: ${threadUrl}`);
-    }
+    const threadId = findRedditThreadId(threadUrl);
+    if (!threadId) {
+        throw new Error(`❌ URL de Reddit inválida. No se encontró el ID del hilo en: ${threadUrl}`);
+    }
 
     const subreddit = threadUrl.split('/r/')[1].split('/')[0];
     const apiUrl = `https://oauth.reddit.com/r/${subreddit}/comments/${threadId}.json?limit=${limit}&threaded=true&sort=top`;
@@ -240,13 +234,13 @@ async function fetchMoreComments(threadId, childrenIds) {
 }
 
 /**
- * SIMPLIFICADO: Solo encuentra el Post existente.
- */
+ * SIMPLIFICADO: Solo encuentra el Post existente.
+ */
 async function createOrFindPost(redditData, entityId, moreComments) {
     let post = await Post.findOne({ entity: entityId }).maxTimeMS(TIMEOUT_MS);
     if (!post) {
-        throw new Error(`❌ Post con entity ${entityId} no encontrado. Ejecute SeedRedditThread.js primero.`);
-    }
+        throw new Error(`❌ Post con entity ${entityId} no encontrado. Ejecute SeedRedditThread.js primero.`);
+    }
 
     console.log(`✅ Post existente encontrado: ${post._id}`);
     if (post.moreCommentsRef.length === 0 && moreComments.length > 0) {
@@ -256,52 +250,72 @@ async function createOrFindPost(redditData, entityId, moreComments) {
     return post;
 }
 
+/**
+ * FUNCIÓN ACTUALIZADA: Asegura que todos los datos de CITIES se pasen al crear el perfil.
+ */
 async function getOrCreateProfile(redditAuthor) {
-    if (authorToNameMap.has(redditAuthor)) {
-        const validName = authorToNameMap.get(redditAuthor);
-        const existingProfile = await Profile.findOne({ name: validName }).maxTimeMS(TIMEOUT_MS);
-        if (existingProfile) return existingProfile;
-    }
-    const validName = generateValidName(redditAuthor);
-    const existingProfile = await Profile.findOne({ name: validName }).maxTimeMS(TIMEOUT_MS);
-    if (existingProfile) {
-        authorToNameMap.set(redditAuthor, validName);
-        return existingProfile;
-    }
-    uniqueAuthors.add(redditAuthor);
-    authorToNameMap.set(redditAuthor, validName);
-    const cityData = CITIES[Math.floor(Math.random() * CITIES.length)];
-    const coordinates = generateRandomCoords(cityData.coords);
+    if (authorToNameMap.has(redditAuthor)) {
+        const validName = authorToNameMap.get(redditAuthor);
+        const existingProfile = await Profile.findOne({ name: validName }).maxTimeMS(TIMEOUT_MS);
+        if (existingProfile) return existingProfile;
+    }
 
-    const profileData = {
-        cid: process.env.CID || 'QU-ME7HF2BN-E8QD9',
-        author: generateAuthorHash(validName), name: validName, given_name: redditAuthor, family_name: 'Reddit',
-        locale: 'en', email: `${validName}@reddit.quelora.com`,
-        picture: `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70) + 1}`,
-        bookmarksCount: 0, commentsCount: 0, followersCount: 0, followingCount: 0,
-        blockedCount: 0, likesCount: 0, sharesCount: 0,
-        location: {
-            type: 'Point', coordinates: coordinates, city: cityData.name, country: cityData.country,
-            countryCode: cityData.countryCode, region: cityData.region, regionCode: cityData.regionCode,
-            lastUpdated: new Date(), source: 'geocoding'
-        },
-        settings: {
-            notifications: { web: true, email: true, push: true, newFollowers: true, postLikes: true, comments: true, newPost: true },
-            privacy: { followerApproval: false, showActivity: 'everyone' },
-            interface: { defaultLanguage: 'en', defaultTheme: 'system' },
-            session: { rememberSession: true }
-        },
-    };
+    const validName = generateValidName(redditAuthor);
+    const existingProfile = await Profile.findOne({ name: validName }).maxTimeMS(TIMEOUT_MS);
+    if (existingProfile) {
+        authorToNameMap.set(redditAuthor, validName);
+        return existingProfile;
+    }
 
-    try {
-        const profile = new Profile(profileData);
-        await profile.save();
-        console.log(`✅ Perfil creado: ${validName} en ${cityData.name}`);
-        return profile;
-    } catch (error) {
-        console.error(`❌ Error creando perfil para ${redditAuthor}:`, error.message);
-        return null;
-    }
+    uniqueAuthors.add(redditAuthor);
+    authorToNameMap.set(redditAuthor, validName);
+    
+    const cityData = CITIES[Math.floor(Math.random() * CITIES.length)];
+    const coordinates = generateRandomCoords(cityData.coords);
+
+    const profileData = {
+        cid: process.env.CID || 'QU-ME7HF2BN-E8QD9',
+        author: generateAuthorHash(validName),
+        name: validName,
+        given_name: redditAuthor,
+        family_name: 'Reddit',
+        locale: 'en',
+        email: `${validName}@reddit.quelora.com`,
+        picture: `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70) + 1}`,
+        bookmarksCount: 0, commentsCount: 0, followersCount: 0, followingCount: 0,
+        blockedCount: 0, likesCount: 0, sharesCount: 0,
+        // ESTRUCTURA DE UBICACIÓN COMPLETA
+        location: {
+            type: 'Point',
+            coordinates: coordinates,
+            city: cityData.name,
+            country: cityData.country,             // 🆕 Campo de texto country
+            countryCode: cityData.countryCode,
+            region: cityData.region,               // 🆕 Campo de texto region
+            regionCode: cityData.regionCode,
+            lastUpdated: new Date(),
+            source: 'geocoding'
+        },
+        simulatedIp: cityData.ip, // Campo temporal para 'simulateRequestFromProfile'
+        settings: {
+            notifications: { web: true, email: true, push: true, newFollowers: true, postLikes: true, comments: true, newPost: true },
+            privacy: { followerApproval: false, showActivity: 'everyone' },
+            interface: { defaultLanguage: 'en', defaultTheme: 'system' },
+            session: { rememberSession: true }
+        },
+    };
+
+    try {
+        const profile = new Profile(profileData);
+        await profile.save();
+        console.log(`✅ Perfil creado: ${validName} en ${cityData.name} (${cityData.ip})`);
+        // Adjuntamos la IP al objeto de retorno para que 'simulateRequestFromProfile' pueda usarla
+        profile._doc.simulatedIp = cityData.ip; 
+        return profile;
+    } catch (error) {
+        console.error(`❌ Error creando perfil para ${redditAuthor}:`, error.message);
+        return null;
+    }
 }
 
 
@@ -337,6 +351,7 @@ async function processCommentsRecursively(commentsData, postId, entityId, allPro
                 accumulateProfileChanges(profile._id, { comments: 1 });
 
                 // --- REGISTRO DE ACTIVIDAD (GENERAL Y GEOGRÁFICA) ---
+                // Se usa profile.toObject() para obtener la IP simulada temporalmente asignada
                 const activityType = parentId ? 'replies' : 'comments';
                 const simulatedReq = simulateRequestFromProfile(profile.toObject()); 
                 
@@ -367,6 +382,7 @@ async function processCommentsRecursively(commentsData, postId, entityId, allPro
 
                             // --- REGISTRO GEOGRÁFICO para CADA LIKER (SOLUCIÓN DE GEOSTATS)
                             for (const likerProfile of selectedLikers) {
+                                // Nota: Aquí usamos el perfil tal como está en el pool (lean data)
                                 const likerReq = simulateRequestFromProfile(likerProfile);
                                 if (likerReq) {
                                     await recordGeoActivity(likerReq, 'like');
@@ -411,23 +427,23 @@ async function seedRedditThread() {
         console.log('✅ Conexión a DB establecida');
         
         console.log('👤 Obteniendo IDs, Autores, CID y Ubicación de perfiles para simulación...');
-        // Carga masiva de datos completos de perfil (incluyendo ubicación para GeoStats)
+        // Se usa .lean() para obtener objetos JS planos más rápido.
+        // Nota: Si 'simulatedIp' no se guarda en el esquema, no estará en el lean() data. 
         const allProfiles = await Profile.find({}, '_id author cid location').lean(); 
         console.log(`👍 Encontrados ${allProfiles.length} perfiles para usar como votantes.`);
 
         const entityId = REDDIT_THREAD_ENTITY;
-        
-        // 🛠️ CORRECCIÓN: Esta línea ahora es segura, pero fallará si la URL es incorrecta
-        const threadId = findRedditThreadId(REDDIT_THREAD_URL);
-        if (!threadId) {
-            console.error(`❌ El valor de REDDIT_URL ('${REDDIT_THREAD_URL}') no es un permalink válido de Reddit.`);
-            throw new Error('URL de Reddit inválida. Debe ser un permalink de Reddit.');
-        }
+        
+        const threadId = findRedditThreadId(REDDIT_THREAD_URL);
+        if (!threadId) {
+            console.error(`❌ El valor de REDDIT_URL ('${REDDIT_THREAD_URL}') no es un permalink válido de Reddit.`);
+            throw new Error('URL de Reddit inválida. Debe ser un permalink de Reddit.');
+        }
 
-        // 🛠️ SOLO OBTENEMOS EL JSON DE COMENTARIOS
+        // SOLO OBTENEMOS EL JSON DE COMENTARIOS
         const redditData = await fetchRedditData(REDDIT_THREAD_URL, REDDIT_LIMIT);
         
-        // 🛠️ BUSCAMOS EL POST EXISTENTE (creado por SeedRedditThread.js)
+        // BUSCAMOS EL POST EXISTENTE
         let post = await createOrFindPost(redditData, entityId, redditData.moreComments);
         
         if (!post?.metadata?.imported_comments) {
@@ -479,5 +495,5 @@ async function seedRedditThread() {
     }
 }
 
-console.log('🚀 Iniciando seedRedditThread (versión 2.16 - Limpiado)...');
+console.log('🚀 Iniciando seedRedditThread (versión 2.16 - Limpiado y separado CITIES)...');
 seedRedditThread();
