@@ -1,6 +1,6 @@
 // ./cron/statsJob.js
 const cron = require('node-cron');
-const { saveStats, saveGeoStats, savePostViews } = require('../services/statsService');
+const { saveStats, saveGeoStats, savePostViews, saveGeoPostStats } = require('../services/statsService');
 
 
 // Ejecutar el job cada 10 segundos
@@ -9,4 +9,5 @@ cron.schedule('0 */1 * * * *', async () => {
   await saveStats();
   await savePostViews();
   await saveGeoStats();
+  await saveGeoPostStats();
 });

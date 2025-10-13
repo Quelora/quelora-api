@@ -55,3 +55,10 @@ db.getCollection("profiles").updateMany(
 db.getCollection("posts").deleteMany({
   
 })
+
+db.getCollection("poststats").remove({})
+db.getCollection("geopoststats").remove({})
+db.getCollection("geostats").remove({})
+db.getCollection("stats").remove({})
+
+db.getCollection("profiles").remove({})

@@ -82,7 +82,7 @@ async function updateDiscoveryPosts() {
 }
 
 // Schedule job to run every 10 seconds
-cron.schedule('*/10 * * * * *', async () => {
+cron.schedule('0 */1 * * * *', async () => {
   console.log('⏲️  Starting discovery job');
   await updateDiscoveryPosts();
 });

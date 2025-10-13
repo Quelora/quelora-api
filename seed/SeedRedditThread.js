@@ -1,6 +1,4 @@
-// SeedRedditThread.js - Versión 2.17 (CORRECCIÓN: Asignación correcta de Reference vs. Link)
-// USO: node SeedRedditThread.js
-// USO PROGRAMADO: node SeedRedditThread.js --scheduled
+// SeedRedditThread.js - Versión 2.20 (FINAL: Elimina 'hit', Registra Likes Agregados y Desagregados)
 
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
@@ -11,19 +9,18 @@ const ProfileLike = require('../models/ProfileLike');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const crypto = require('crypto');
-const { recordActivityHit } = require('../utils/recordStatsActivity'); 
+const { recordActivityHit, recordGeoActivity } = require('../utils/recordStatsActivity'); 
+
+const { CITIES } = require('./config/geoData'); 
 
 const REDDIT_CLIENT_ID = process.env.REDDIT_CLIENT_ID;
 const REDDIT_CLIENT_SECRET = process.env.REDDIT_CLIENT_SECRET;
 const POST_LIMIT = process.env.TRENDING_LIMIT || 500;
 const MIN_COMMENTS = process.env.MIN_COMMENTS || 50;
 
-// --- ESTRATEGIA DE BATCHING PARA CONTADORES DE PERFILES ---
 const profileUpdatesMap = new Map(); 
 const TIMEOUT_MS = 25000;
-// -----------------------------------------------------------
 
-// Subreddits de tecnología/programación a monitorear
 const TECH_SUBREDDITS = [
     'programming', 'technology', 'computerscience', 'coding', 
     'webdev', 'learnprogramming', 'compsci', 'softwareengineering',
@@ -36,17 +33,35 @@ const TECH_SUBREDDITS = [
 
 let accessToken = null;
 
-// --- FUNCIONES DE SCRAPING ---
+function simulateRequestFromProfile(profile) {
+    const geo = profile.location;
+
+    if (!profile || !geo || !profile.cid || !geo.coordinates || geo.coordinates.length < 2) {
+        return null;
+    }
+    
+    const clientIp = profile.simulatedIp || `192.0.2.${Math.floor(Math.random() * 255)}`;
+
+    return {
+        cid: profile.cid,
+        clientIp: clientIp,
+        clientCountry: geo.country || '',
+        clientCountryCode: geo.countryCode || '',
+        clientRegion: geo.region || '',
+        clientRegionCode: geo.regionCode || '',
+        clientCity: geo.city || '',
+        clientLatitude: geo.coordinates[1],
+        clientLongitude: geo.coordinates[0],
+        geoData: null
+    };
+}
 
 const decodeHtmlEntities = (str) => str ? str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') : str;
 
-/**
- * Raspa el HTML del permalink de Reddit para encontrar la URL externa.
- */
 async function scrapeRedditForExternalLink(redditPermalink) {
     try {
         console.log(`🔎 Scrapeando HTML de Reddit para link externo: ${redditPermalink}`);
-        const { data } = await axios.get(redditPermalink, { headers: { 'User-Agent': 'TechPosts-Importer/2.17' }, timeout: TIMEOUT_MS });
+        const { data } = await axios.get(redditPermalink, { headers: { 'User-Agent': 'TechPosts-Importer/2.20' }, timeout: TIMEOUT_MS });
         const $ = cheerio.load(data);
         
         const selector = 'faceplate-tracker a[target="_blank"][rel*="noopener"][rel*="nofollow"][class*="border-solid"]';
@@ -66,19 +81,15 @@ async function scrapeRedditForExternalLink(redditPermalink) {
     }
 }
 
-
-/**
- * Implementación de scraping de la URL de destino para la descripción.
- */
 async function scrapeWebpage(url) {
     try {
         console.log(`🌍 Intentando scrapeo de la descripción de: ${url}`);
-        const { data } = await axios.get(url, { headers: { 'User-Agent': 'TechPosts-Importer/2.17' }, timeout: TIMEOUT_MS });
+        const { data } = await axios.get(url, { headers: { 'User-Agent': 'TechPosts-Importer/2.20' }, timeout: TIMEOUT_MS });
         const $ = cheerio.load(data);
         
         let description = $('meta[name="description"]').attr('content') 
-                        || $('meta[property="og:description"]').attr('content') 
-                        || '';
+                         || $('meta[property="og:description"]').attr('content') 
+                         || '';
         
         if (!description) {
             const firstParagraph = $('p').first().text();
@@ -92,16 +103,6 @@ async function scrapeWebpage(url) {
         console.error(`⚠️ Error scraping descripción de ${url}: ${error.message}`);
         return '';
     }
-}
-
-
-// --- FUNCIONES DE BATCHING Y REDDIT API ---
-
-function accumulateProfileChanges(profileId, changes) {
-    const current = profileUpdatesMap.get(profileId.toString()) || { likes: 0 };
-    profileUpdatesMap.set(profileId.toString(), {
-        likes: current.likes + (changes.likes || 0)
-    });
 }
 
 async function bulkUpdateProfileCounters() {
@@ -143,7 +144,7 @@ async function getRedditAccessToken() {
                 headers: {
                     'Authorization': `Basic ${auth}`,
                     'Content-Type': 'application/x-www-form-urlencoded',
-                    'User-Agent': 'TechPosts-Importer/2.17'
+                    'User-Agent': 'TechPosts-Importer/2.20'
                 },
                 timeout: 10000
             }
@@ -166,7 +167,7 @@ async function makeRedditRequest(url) {
         const response = await axios.get(url, {
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
-                'User-Agent': 'TechPosts-Importer/2.17'
+                'User-Agent': 'TechPosts-Importer/2.20'
             },
             timeout: 15000
         });
@@ -182,9 +183,6 @@ async function makeRedditRequest(url) {
     }
 }
 
-/**
- * Obtiene posts populares de tecnología con mínimo de comentarios
- */
 async function fetchTechPostsWithComments() {
     try {
         console.log(`📡 Buscando posts de tecnología con ≥ ${MIN_COMMENTS} comentarios...`);
@@ -208,8 +206,8 @@ async function fetchTechPostsWithComments() {
                         upvotes: post.data.ups,
                         comments: post.data.num_comments,
                         created: post.data.created_utc,
-                        url: `https://reddit.com${post.data.permalink}`, // Permalink de Reddit
-                        external_link_api: post.data.url, // URL que la API devuelve (puede ser externa o Reddit)
+                        url: `https://reddit.com${post.data.permalink}`,
+                        external_link_api: post.data.url,
                         image: getPostImage(post.data),
                         video: getPostVideo(post.data),
                         gallery: getPostGallery(post.data),
@@ -323,15 +321,26 @@ async function postExists(entityId) {
     return !!existing;
 }
 
-async function simulatePostLikes(postId, likesCount, allProfileIds) {
-    if (likesCount <= 0 || allProfileIds.length === 0) {
+function accumulateProfileChanges(profileId, changes) {
+    const current = profileUpdatesMap.get(profileId.toString()) || { likes: 0 };
+    profileUpdatesMap.set(profileId.toString(), {
+        likes: current.likes + (changes.likes || 0)
+    });
+}
+
+
+async function simulatePostLikes(postId, likesCount, allProfiles) {
+    const entityId = postId.toString(); 
+    const cid = process.env.CID;
+    
+    if (likesCount <= 0 || allProfiles.length === 0) {
         return [];
     }
 
     try {
-        const profileIdToAuthorMap = new Map(allProfileIds.map(p => [p._id.toString(), p.author]));
+        const profileIdToAuthorMap = new Map(allProfiles.map(p => [p._id.toString(), p.author]));
         
-        const shuffledLikerPool = [...allProfileIds].sort(() => 0.5 - Math.random());
+        const shuffledLikerPool = [...allProfiles].sort(() => 0.5 - Math.random());
         const numLikesToCreate = Math.min(likesCount, shuffledLikerPool.length);
         const selectedLikers = shuffledLikerPool.slice(0, numLikesToCreate);
         
@@ -343,16 +352,33 @@ async function simulatePostLikes(postId, likesCount, allProfileIds) {
         
         if (profileLikeDocs.length > 0) {
             await ProfileLike.insertMany(profileLikeDocs);
-            console.log(`❤️  ${profileLikeDocs.length} likes simulados para el post ${postId}`);
+            console.log(`❤️  ${profileLikeDocs.length} likes simulados para el post ${entityId}`);
             
-            await recordActivityHit(`activity:likes:${process.env.CID}`, 'added', profileLikeDocs.length);
+            // --- REGISTRO DE ESTADÍSTICAS ---
             
+            // 1. Registro PUNTUAL DESAGREGADO (PostStats)
+            await recordActivityHit(`activity:likes:${cid}`, 'added', entityId);
+            // 2. Registro PUNTUAL AGREGADO (Stats)
+            await recordActivityHit(`activity:likes:${cid}`, 'added');
+
             const likerAuthors = selectedLikers.map(l => profileIdToAuthorMap.get(l._id.toString()) || l.author);
             
             await Post.findByIdAndUpdate(postId, {
                 $push: { likes: { $each: likerAuthors, $slice: -200 } }
             });
             console.log(`✍️  Añadidos ${likerAuthors.length} autores (hashes) al array de likes del post.`);
+
+            for (const liker of selectedLikers) {
+                if (liker && liker.location?.countryCode) {
+                    const simulatedReq = simulateRequestFromProfile(liker);
+                    if (simulatedReq) {
+                        // 3. Registro GEOGRÁFICO DESAGREGADO (GeoPostStats)
+                        await recordGeoActivity(simulatedReq, 'like', entityId); 
+                        // 4. Registro GEOGRÁFICO AGREGADO (GeoStats)
+                        await recordGeoActivity(simulatedReq, 'like');
+                    }
+                }
+            }
 
             for (const liker of selectedLikers) {
                 accumulateProfileChanges(liker._id, { likes: 1 });
@@ -363,44 +389,37 @@ async function simulatePostLikes(postId, likesCount, allProfileIds) {
         
         return [];
     } catch (error) {
-        console.error(`❌ Error simulando likes para post ${postId}:`, error.message);
+        console.error(`❌ Error simulando likes para post ${entityId}:`, error.message);
         return [];
     }
 }
 
-/**
- * 🛠️ LÓGICA CORREGIDA: Asigna postData.url (Permalink de Reddit) a 'reference' y la finalLink (Externa) a 'link'.
- */
-async function importPost(postData, allProfileIds) {
+async function importPost(postData, allProfiles) {
     const entityId = generateEntityId(postData.url);
     
     if (await postExists(entityId)) {
         console.log(`⏩ Post ya existe: r/${postData.subreddit} - ${postData.title.substring(0, 60)}...`);
         return { skipped: true, reason: 'exists' };
     }
-    
-    // 1. DETERMINAR URL FINAL Y BUSCAR DESCRIPCIÓN
-    let finalLink = postData.external_link_api;
-    let description = postData.description; 
-    
-    // Si la URL de la API es el permalink de Reddit (o no es obvia), raspamos el HTML
-    if (!finalLink || finalLink.includes('reddit.com')) {
-        const scrapedLink = await scrapeRedditForExternalLink(postData.url); // postData.url es el permalink de Reddit
-        if (scrapedLink) {
-            finalLink = scrapedLink;
-        } else {
-            finalLink = postData.url; // Fallback al permalink si no se encuentra enlace externo
-        }
-    }
+    
+    let finalLink = postData.external_link_api;
+    let description = postData.description; 
+    
+    if (!finalLink || finalLink.includes('reddit.com')) {
+        const scrapedLink = await scrapeRedditForExternalLink(postData.url);
+        if (scrapedLink) {
+            finalLink = scrapedLink;
+        } else {
+            finalLink = postData.url;
+        }
+    }
 
-    // 2. SCRAPING de la página final para obtener la descripción si no es selftext
-    if (!postData.description && finalLink && !finalLink.includes('reddit.com')) {
-        const scrapedDescription = await scrapeWebpage(finalLink);
-        description = scrapedDescription || description; 
-    }
+    if (!postData.description && finalLink && !finalLink.includes('reddit.com')) {
+        const scrapedDescription = await scrapeWebpage(finalLink);
+        description = scrapedDescription || description; 
+    }
 
-    // 3. Control de contenido para posts sin media
-    if (!hasMediaContent(postData) && finalLink.includes('reddit.com')) {
+    if (!hasMediaContent(postData) && finalLink.includes('reddit.com')) {
         console.log(`❌ Post sin multimedia Y sin link externo - SKIPPED: r/${postData.subreddit} - ${postData.title.substring(0, 60)}...`);
         return { skipped: true, reason: 'no_media' };
     }
@@ -411,11 +430,11 @@ async function importPost(postData, allProfileIds) {
         const post = new Post({
             cid: process.env.CID || 'QU-ME7HF2BN-E8QD9',
             entity: entityId,
-            reference: postData.url, // 🛠️ CORREGIDO: URL de Reddit (Permalink)
+            reference: postData.url,
             title: postData.title.substring(0, 100),
             description: description.substring(0, 200) || '',
             type: 'reddit_tech',
-            link: finalLink, // 🛠️ CORREGIDO: URL Externa (o permalink si no hay externa)
+            link: finalLink,
             image: primaryMedia, 
             media: postData.media, 
             likesCount: postData.upvotes,
@@ -429,7 +448,7 @@ async function importPost(postData, allProfileIds) {
                 nsfw: postData.nsfw,
                 original_comments: postData.comments,
                 imported_comments: false,
-                reddit_permalink: postData.url, 
+                reddit_permalink: postData.url, 
                 has_image: !!postData.image,
                 has_video: !!postData.video,
                 has_gallery: !!postData.gallery,
@@ -440,8 +459,8 @@ async function importPost(postData, allProfileIds) {
         await post.save();
         console.log(`✅ Post importado: r/${postData.subreddit} (Link: ${finalLink.substring(0, 40)}...)`);
         
-        if (postData.upvotes > 0 && allProfileIds.length > 0) {
-            await simulatePostLikes(post._id, postData.upvotes, allProfileIds);
+        if (postData.upvotes > 0 && allProfiles.length > 0) {
+            await simulatePostLikes(post._id, postData.upvotes, allProfiles);
         }
         
         return { success: true, post };
@@ -449,13 +468,6 @@ async function importPost(postData, allProfileIds) {
         console.error(`❌ Error importando post:`, error.message);
         return { error: true };
     }
-}
-
-function getMediaType(postData) {
-    if (postData.video) return 'video';
-    if (postData.gallery) return `gallery(${postData.gallery.length} images)`;
-    if (postData.image) return 'image';
-    return 'no media';
 }
 
 async function runImportProcess() {
@@ -468,10 +480,14 @@ async function runImportProcess() {
         await connectDB();
         console.log('✅ Conectado a la base de datos');
         
-        console.log('👤 Obteniendo IDs y Autores de perfiles para simulación de likes...');
-        const allProfileIds = await Profile.find({}, '_id author').lean(); 
-        console.log(`👍 Encontrados ${allProfileIds.length} perfiles para usar como votantes.`);
+        console.log('👤 Obteniendo IDs, Autores y Ubicación de perfiles para simulación...');
+        const allProfiles = await Profile.find({}, '_id author location simulatedIp').lean(); 
+        console.log(`👍 Encontrados ${allProfiles.length} perfiles para usar como votantes.`);
         
+        if (allProfiles.length === 0) {
+            console.warn('⚠️ No hay perfiles creados para simular actividad.');
+        }
+
         const techPosts = await fetchTechPostsWithComments();
         
         console.log(`\n📥 Analizando y filtrando posts para importar...`);
@@ -482,7 +498,7 @@ async function runImportProcess() {
         let errors = 0;
         
         for (const post of techPosts) {
-            const result = await importPost(post, allProfileIds);
+            const result = await importPost(post, allProfiles);
             
             if (result.skipped) {
                 if (result.reason === 'no_media') {

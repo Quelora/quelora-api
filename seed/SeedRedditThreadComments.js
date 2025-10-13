@@ -1,5 +1,5 @@
-// SeedRedditThreadComments.js - Versión 2.16 (CORRECCIÓN FINAL: Seguridad de URL + Separación de CITIES)
-// USO: CID="QU-ME7HF2BN-E8QD9" REDDIT_URL="https://www.reddit.com/r/Android/comments/1nr65np/android_will-soon-run-linux_apps_better_by-adding/" node SeedRedditThreadComments.js
+// USO: CID="QU-ME7HF2BN-E8QD9" REDDIT_URL="..." node SeedRedditThreadComments.js
+// SeedRedditThreadComments.js - Versión 2.20 (FINAL: Elimina 'hit', Registra Comments/Replies/Likes Agregados y Desagregados)
 
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
@@ -14,7 +14,6 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const { recordGeoActivity, recordActivityHit } = require('../utils/recordStatsActivity'); 
 
-// 🆕 Importar CITIES desde el archivo de configuración externo
 const { CITIES } = require('./config/geoData');
 
 const REDDIT_THREAD_ENTITY  = process.env.REDDIT_ENTITY;
@@ -23,33 +22,27 @@ const REDDIT_LIMIT = process.env.REDDIT_LIMIT || 1000;
 const REDDIT_CLIENT_ID = process.env.REDDIT_CLIENT_ID;
 const REDDIT_CLIENT_SECRET = process.env.REDDIT_CLIENT_SECRET;
 
-// Sets para optimización
 const uniqueAuthors = new Set();
 const usedValidNames = new Set();
 const authorToNameMap = new Map();
 
-// --- ESTRATEGIA DE BATCHING PARA CONTADORES DE PERFILES ---
 const profileUpdatesMap = new Map(); 
 const TIMEOUT_MS = 25000;
 const MORE_COMMENTS_BATCH_SIZE = 100;
-// -----------------------------------------------------------
 
 let accessToken = null;
+let US_CITIES_FILTERED = null;
 
-// --- FUNCIONES DE AUTENTICACIÓN Y REDDIT (User-Agent actualizado) ---
 async function getRedditAccessToken() {
     try {
-        console.log('🔑 Obteniendo token de acceso de Reddit...');
         const auth = Buffer.from(`${REDDIT_CLIENT_ID}:${REDDIT_CLIENT_SECRET}`).toString('base64');
         const response = await axios.post('https://www.reddit.com/api/v1/access_token', 'grant_type=client_credentials', {
-            headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Quelora-Seeder/2.16' },
+            headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Quelora-Seeder/2.20' },
             timeout: 10000
         });
         accessToken = response.data.access_token;
-        console.log('✅ Token de acceso obtenido exitosamente');
         return accessToken;
     } catch (error) {
-        console.error('❌ Error obteniendo token de acceso:', error.response?.data || error.message);
         throw error;
     }
 }
@@ -57,24 +50,20 @@ async function getRedditAccessToken() {
 async function makeAuthenticatedRedditRequest(url, method = 'get', data = null) {
     if (!accessToken) await getRedditAccessToken();
     try {
-        const config = { method, url, headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Quelora-Seeder/2.16' }, timeout: TIMEOUT_MS };
+        const config = { method, url, headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Quelora-Seeder/2.20' }, timeout: TIMEOUT_MS };
         if (method === 'post') {
             config.data = data;
             config.headers['Content-Type'] = 'application/x-www-form-urlencoded';
         }
         return (await axios(config)).data;
     } catch (error) {
-        console.error('❌ Error en solicitud a Reddit:', error.message);
         if (error.response?.status === 401) {
-            console.log('🔄 Token expirado, obteniendo nuevo token...');
             await getRedditAccessToken();
             return makeAuthenticatedRedditRequest(url, method, data);
         }
         throw error;
     }
 }
-
-// --- FUNCIONES AUXILIARES ---
 
 const generateRandomCoords = (baseCoords) => {
     const [lon, lat] = baseCoords;
@@ -106,8 +95,6 @@ const generateValidName = (redditUsername) => {
         if (counter > 100) throw new Error(`Name generation failed for ${redditUsername}`);
     }
 };
-
-const decodeHtmlEntities = (str) => str ? str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') : str;
 
 function accumulateProfileChanges(profileId, changes) {
     const current = profileUpdatesMap.get(profileId.toString()) || { comments: 0, likes: 0 };
@@ -148,40 +135,30 @@ async function bulkUpdateProfileCounters() {
     }
 }
 
-/**
- * 🛠️ Corregido: La IP simulada ahora se intenta tomar del objeto Profile.
- */
 function simulateRequestFromProfile(profile) {
-    const geo = profile.location;
+    const geo = profile.location;
 
-    if (!profile || !geo || !profile.cid || !geo.coordinates || geo.coordinates.length < 2) {
-        const cid = profile?.cid || process.env.CID || 'N/A';
-        console.warn(`⚠️ Perfil incompleto para GeoStats (CID: ${cid}).`);
-        return null;
-    }
+    if (!profile || !geo || !profile.cid || !geo.coordinates || geo.coordinates.length < 2) {
+        const cid = profile?.cid || process.env.CID || 'N/A';
+        return null;
+    }
 
-    const clientIp = profile.simulatedIp || `192.0.2.${Math.floor(Math.random() * 255)}`;
+    const clientIp = profile.simulatedIp || `192.0.2.${Math.floor(Math.random() * 255)}`;
 
-    return {
-        cid: profile.cid,
-        clientIp: clientIp, // IP simulada o generada
-        
-        clientCountry: geo.country || '',
-        clientCountryCode: geo.countryCode || '',
-        clientRegion: geo.region || '',
-        clientRegionCode: geo.regionCode || '',
-        clientCity: geo.city || '',
-        clientLatitude: geo.coordinates[1],
-        clientLongitude: geo.coordinates[0],
-        
-        geoData: null
-    };
+    return {
+        cid: profile.cid,
+        clientIp: clientIp,
+        clientCountry: geo.country || '',
+        clientCountryCode: geo.countryCode || '',
+        clientRegion: geo.region || '',
+        clientRegionCode: geo.regionCode || '',
+        clientCity: geo.city || '',
+        clientLatitude: geo.coordinates[1],
+        clientLongitude: geo.coordinates[0],
+        geoData: null
+    };
 }
 
-
-/**
- * 🆕 FUNCIÓN DE SEGURIDAD: Extrae el threadId de la URL de Reddit de forma segura.
- */
 function findRedditThreadId(url) {
     const threadMatch = url.match(/comments\/([a-z0-9]+)/i);
     if (!threadMatch || !threadMatch[1]) {
@@ -190,12 +167,78 @@ function findRedditThreadId(url) {
     return threadMatch[1];
 }
 
+async function getOrCreateProfile(redditAuthor) {
+    if (authorToNameMap.has(redditAuthor)) {
+        const validName = authorToNameMap.get(redditAuthor);
+        const existingProfile = await Profile.findOne({ name: validName }).maxTimeMS(TIMEOUT_MS);
+        if (existingProfile) return existingProfile;
+    }
 
-// --- LÓGICA PRINCIPAL DE SEEDING (Simplificada) ---
+    const validName = generateValidName(redditAuthor);
+    const existingProfile = await Profile.findOne({ name: validName }).maxTimeMS(TIMEOUT_MS);
+    if (existingProfile) {
+        authorToNameMap.set(redditAuthor, validName);
+        return existingProfile;
+    }
 
-/**
- * SIMPLIFICADO: Solo obtiene el JSON de comentarios.
- */
+    uniqueAuthors.add(redditAuthor);
+    authorToNameMap.set(redditAuthor, validName);
+    
+    if (!US_CITIES_FILTERED) {
+        US_CITIES_FILTERED = CITIES.filter(city => city.countryCode === 'US');
+        if (US_CITIES_FILTERED.length === 0) {
+            console.error('❌ No hay ciudades de US en CITIES config. Usando la lista completa.');
+            US_CITIES_FILTERED = CITIES;
+        }
+    }
+
+    const cityData = US_CITIES_FILTERED[Math.floor(Math.random() * US_CITIES_FILTERED.length)];
+    const coordinates = generateRandomCoords(cityData.coords);
+
+    const profileData = {
+        cid: process.env.CID || 'QU-ME7HF2BN-E8QD9',
+        author: generateAuthorHash(validName),
+        name: validName,
+        given_name: redditAuthor,
+        family_name: 'Reddit',
+        locale: 'en',
+        email: `${validName}@reddit.quelora.com`,
+        picture: `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70) + 1}`,
+        bookmarksCount: 0, commentsCount: 0, followersCount: 0, followingCount: 0,
+        blockedCount: 0, likesCount: 0, sharesCount: 0,
+        location: {
+            type: 'Point',
+            coordinates: coordinates,
+            city: cityData.name,
+            country: cityData.country,             
+            countryCode: cityData.countryCode,
+            region: cityData.region,               
+            regionCode: cityData.regionCode,
+            lastUpdated: new Date(),
+            source: 'geocoding'
+        },
+        simulatedIp: cityData.ip,
+        settings: {
+            notifications: { web: true, email: true, push: true, newFollowers: true, postLikes: true, comments: true, newPost: true },
+            privacy: { followerApproval: false, showActivity: 'everyone' },
+            interface: { defaultLanguage: 'en', defaultTheme: 'system' },
+            session: { rememberSession: true }
+        },
+    };
+
+    try {
+        const profile = new Profile(profileData);
+        await profile.save();
+        console.log(`✅ Perfil creado: ${validName} en ${cityData.name}, ${cityData.countryCode} (${cityData.ip})`);
+        // Aseguramos que el objeto retornado tenga el IP simulado para GeoStats
+        profile._doc.simulatedIp = cityData.ip; 
+        return profile;
+    } catch (error) {
+        console.error(`❌ Error creando perfil para ${redditAuthor}:`, error.message);
+        return null;
+    }
+}
+
 async function fetchRedditData(threadUrl, limit = 1000) {
     const threadId = findRedditThreadId(threadUrl);
     if (!threadId) {
@@ -233,9 +276,6 @@ async function fetchMoreComments(threadId, childrenIds) {
     }
 }
 
-/**
- * SIMPLIFICADO: Solo encuentra el Post existente.
- */
 async function createOrFindPost(redditData, entityId, moreComments) {
     let post = await Post.findOne({ entity: entityId }).maxTimeMS(TIMEOUT_MS);
     if (!post) {
@@ -250,89 +290,24 @@ async function createOrFindPost(redditData, entityId, moreComments) {
     return post;
 }
 
-/**
- * FUNCIÓN ACTUALIZADA: Asegura que todos los datos de CITIES se pasen al crear el perfil.
- */
-async function getOrCreateProfile(redditAuthor) {
-    if (authorToNameMap.has(redditAuthor)) {
-        const validName = authorToNameMap.get(redditAuthor);
-        const existingProfile = await Profile.findOne({ name: validName }).maxTimeMS(TIMEOUT_MS);
-        if (existingProfile) return existingProfile;
-    }
-
-    const validName = generateValidName(redditAuthor);
-    const existingProfile = await Profile.findOne({ name: validName }).maxTimeMS(TIMEOUT_MS);
-    if (existingProfile) {
-        authorToNameMap.set(redditAuthor, validName);
-        return existingProfile;
-    }
-
-    uniqueAuthors.add(redditAuthor);
-    authorToNameMap.set(redditAuthor, validName);
-    
-    const cityData = CITIES[Math.floor(Math.random() * CITIES.length)];
-    const coordinates = generateRandomCoords(cityData.coords);
-
-    const profileData = {
-        cid: process.env.CID || 'QU-ME7HF2BN-E8QD9',
-        author: generateAuthorHash(validName),
-        name: validName,
-        given_name: redditAuthor,
-        family_name: 'Reddit',
-        locale: 'en',
-        email: `${validName}@reddit.quelora.com`,
-        picture: `https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 70) + 1}`,
-        bookmarksCount: 0, commentsCount: 0, followersCount: 0, followingCount: 0,
-        blockedCount: 0, likesCount: 0, sharesCount: 0,
-        // ESTRUCTURA DE UBICACIÓN COMPLETA
-        location: {
-            type: 'Point',
-            coordinates: coordinates,
-            city: cityData.name,
-            country: cityData.country,             // 🆕 Campo de texto country
-            countryCode: cityData.countryCode,
-            region: cityData.region,               // 🆕 Campo de texto region
-            regionCode: cityData.regionCode,
-            lastUpdated: new Date(),
-            source: 'geocoding'
-        },
-        simulatedIp: cityData.ip, // Campo temporal para 'simulateRequestFromProfile'
-        settings: {
-            notifications: { web: true, email: true, push: true, newFollowers: true, postLikes: true, comments: true, newPost: true },
-            privacy: { followerApproval: false, showActivity: 'everyone' },
-            interface: { defaultLanguage: 'en', defaultTheme: 'system' },
-            session: { rememberSession: true }
-        },
-    };
-
-    try {
-        const profile = new Profile(profileData);
-        await profile.save();
-        console.log(`✅ Perfil creado: ${validName} en ${cityData.name} (${cityData.ip})`);
-        // Adjuntamos la IP al objeto de retorno para que 'simulateRequestFromProfile' pueda usarla
-        profile._doc.simulatedIp = cityData.ip; 
-        return profile;
-    } catch (error) {
-        console.error(`❌ Error creando perfil para ${redditAuthor}:`, error.message);
-        return null;
-    }
+// Función auxiliar para obtener el perfil de un autor rápidamente desde el Map de perfiles existentes
+function getProfileByAuthor(authorId, allProfilesMap) {
+    return allProfilesMap.get(authorId.toString());
 }
 
-
-async function processCommentsRecursively(commentsData, postId, entityId, allProfiles, parentId = null) {
+async function processCommentsRecursively(commentsData, postId, entityId, allProfiles, allProfilesMap, parentId = null) {
     let createdCommentsCount = 0;
     const newMoreCommentIds = [];
-
-    const profileIdToAuthorMap = new Map(allProfiles.map(p => [p._id.toString(), p.author]));
+    const cid = process.env.CID;
 
     for (const item of commentsData) {
         if (item.kind === 't1' && item.data.author && item.data.body && !['[deleted]', '[removed]'].includes(item.data.body)) {
             const commentData = item.data;
             if (await Comment.findOne({ reference: commentData.name }).select('_id').lean()) {
-                console.log(`⏩ Comentario ya existe, saltando: ${commentData.name}`); 
                 continue;
             }
             try {
+                // Si el perfil no existe, lo crea
                 const profile = await getOrCreateProfile(commentData.author);
                 if (!profile) continue;
 
@@ -350,18 +325,23 @@ async function processCommentsRecursively(commentsData, postId, entityId, allPro
                 await new ProfileComment({ profile_id: profile._id, post_id: postId, comment_id: newComment._id }).save();
                 accumulateProfileChanges(profile._id, { comments: 1 });
 
-                // --- REGISTRO DE ACTIVIDAD (GENERAL Y GEOGRÁFICA) ---
-                // Se usa profile.toObject() para obtener la IP simulada temporalmente asignada
+                const action = parentId ? 'reply' : 'comment';
                 const activityType = parentId ? 'replies' : 'comments';
                 const simulatedReq = simulateRequestFromProfile(profile.toObject()); 
                 
                 if (simulatedReq) {
-                    await recordActivityHit(`activity:${activityType}:${process.env.CID}`, 'added', 1);
-                    // REGISTRO GEOGRÁFICO
-                    await recordGeoActivity(simulatedReq, parentId ? 'reply' : 'comment'); 
+                    // --- REGISTRO DE ESTADÍSTICAS DEL COMENTARIO/RESPUESTA ---
+                    
+                    // 1. Registro PUNTUAL DESAGREGADO (PostStats)
+                    await recordActivityHit(`activity:${activityType}:${cid}`, 'added', entityId);
+                    // 2. Registro PUNTUAL AGREGADO (Stats)
+                    await recordActivityHit(`activity:${activityType}:${cid}`, 'added');
+                    
+                    // 3. Registro GEOGRÁFICO DESAGREGADO (GeoPostStats)
+                    await recordGeoActivity(simulatedReq, action, entityId); 
+                    // 4. Registro GEOGRÁFICO AGREGADO (GeoStats)
+                    await recordGeoActivity(simulatedReq, action);
                 }
-                // ---------------------------------------------------
-
 
                 if (likesCount > 0 && allProfiles.length > 0) {
                     const likerPool = allProfiles.filter(p => p._id.toString() !== profile._id.toString());
@@ -378,18 +358,23 @@ async function processCommentsRecursively(commentsData, postId, entityId, allPro
                             await ProfileLike.insertMany(profileLikeDocs);
                             console.log(`❤️     ${profileLikeDocs.length} likes simulados para el comentario ${newComment._id}`);
                             
-                            await recordActivityHit(`activity:likes:${process.env.CID}`, 'added', profileLikeDocs.length);
+                            // --- REGISTRO DE ESTADÍSTICAS DEL LIKE (COMENTARIO) ---
+                            
+                            // 1. Registro PUNTUAL DESAGREGADO (PostStats)
+                            await recordActivityHit(`activity:likes:${cid}`, 'added', entityId);
+                            // 2. Registro PUNTUAL AGREGADO (Stats)
+                            await recordActivityHit(`activity:likes:${cid}`, 'added');
 
-                            // --- REGISTRO GEOGRÁFICO para CADA LIKER (SOLUCIÓN DE GEOSTATS)
-                            for (const likerProfile of selectedLikers) {
-                                // Nota: Aquí usamos el perfil tal como está en el pool (lean data)
-                                const likerReq = simulateRequestFromProfile(likerProfile);
+                            for (const liker of selectedLikers) {
+                                const likerReq = simulateRequestFromProfile(liker);
                                 if (likerReq) {
+                                    // 3. Registro GEOGRÁFICO DESAGREGADO (GeoPostStats)
+                                    await recordGeoActivity(likerReq, 'like', entityId);
+                                    // 4. Registro GEOGRÁFICO AGREGADO (GeoStats)
                                     await recordGeoActivity(likerReq, 'like');
                                 }
-                                accumulateProfileChanges(likerProfile._id, { likes: 1 });
+                                accumulateProfileChanges(liker._id, { likes: 1 });
                             }
-                            // ---------------------------------------------
                             
                             const likerAuthors = selectedLikers.map(l => l.author);
                             await Comment.findByIdAndUpdate(newComment._id, {
@@ -402,7 +387,7 @@ async function processCommentsRecursively(commentsData, postId, entityId, allPro
                 if (parentId) await Comment.findByIdAndUpdate(parentId, { $inc: { repliesCount: 1 } });
                 
                 if (commentData.replies?.data?.children.length > 0) {
-                    const { count, moreIds } = await processCommentsRecursively(commentData.replies.data.children, postId, entityId, allProfiles, newComment._id);
+                    const { count, moreIds } = await processCommentsRecursively(commentData.replies.data.children, postId, entityId, allProfiles, allProfilesMap, newComment._id);
                     createdCommentsCount += count;
                     newMoreCommentIds.push(...moreIds);
                 }
@@ -426,12 +411,13 @@ async function seedRedditThread() {
         await connectDB();
         console.log('✅ Conexión a DB establecida');
         
-        console.log('👤 Obteniendo IDs, Autores, CID y Ubicación de perfiles para simulación...');
-        // Se usa .lean() para obtener objetos JS planos más rápido.
-        // Nota: Si 'simulatedIp' no se guarda en el esquema, no estará en el lean() data. 
-        const allProfiles = await Profile.find({}, '_id author cid location').lean(); 
+        console.log('👤 Obteniendo IDs, Autores, CID y Ubicación de perfiles para simulación (Carga única)...');
+        // CARGA ÚNICA DE TODOS LOS PERFILES PARA EVITAR CONSULTAS EN EL BUCLE RECURSIVO
+        const allProfiles = await Profile.find({}, '_id author cid location simulatedIp').lean(); 
         console.log(`👍 Encontrados ${allProfiles.length} perfiles para usar como votantes.`);
 
+        const allProfilesMap = new Map(allProfiles.map(p => [p._id.toString(), p]));
+        
         const entityId = REDDIT_THREAD_ENTITY;
         
         const threadId = findRedditThreadId(REDDIT_THREAD_URL);
@@ -440,16 +426,15 @@ async function seedRedditThread() {
             throw new Error('URL de Reddit inválida. Debe ser un permalink de Reddit.');
         }
 
-        // SOLO OBTENEMOS EL JSON DE COMENTARIOS
         const redditData = await fetchRedditData(REDDIT_THREAD_URL, REDDIT_LIMIT);
         
-        // BUSCAMOS EL POST EXISTENTE
         let post = await createOrFindPost(redditData, entityId, redditData.moreComments);
         
         if (!post?.metadata?.imported_comments) {
             console.log("⏳ Realizando importación inicial de comentarios...");
             
-            const { count, moreIds } = await processCommentsRecursively(redditData.comments, post._id, entityId, allProfiles, null);
+            // PASAMOS EL ARRAY DE PERFILES Y EL MAP A LA FUNCIÓN RECURSIVA
+            const { count, moreIds } = await processCommentsRecursively(redditData.comments, post._id, entityId, allProfiles, allProfilesMap, null);
             
             if (moreIds.length > 0) {
                 await Post.findByIdAndUpdate(post._id, { $addToSet: { moreCommentsRef: { $each: moreIds } } });
@@ -466,7 +451,8 @@ async function seedRedditThread() {
             const idsToFetch = post.moreCommentsRef.splice(0, MORE_COMMENTS_BATCH_SIZE);
             const newCommentsData = await fetchMoreComments(threadId, idsToFetch);
             if (newCommentsData.length > 0) {
-                const { moreIds } = await processCommentsRecursively(newCommentsData, post._id, entityId, allProfiles, null); 
+                // PASAMOS EL ARRAY DE PERFILES Y EL MAP A LA FUNCIÓN RECURSIVA
+                const { moreIds } = await processCommentsRecursively(newCommentsData, post._id, entityId, allProfiles, allProfilesMap, null); 
                 post.moreCommentsRef.push(...moreIds);
             }
             await Post.findByIdAndUpdate(post._id, { $set: { moreCommentsRef: post.moreCommentsRef } });
@@ -484,7 +470,7 @@ async function seedRedditThread() {
             'metadata.imported_comments': true
         });
 
-        console.log('🎉 Hilo de Reddit importado/actualizado exitosamente! Las GeoStats deberían estar registradas.');
+        console.log('🎉 Hilo de Reddit importado/actualizado exitosamente! Las GeoStats de interacciones están registradas correctamente.');
     } catch (err) {
         console.error('❌ Error fatal en el seed:', err.message, err.stack);
         exitCode = 1;
@@ -495,5 +481,5 @@ async function seedRedditThread() {
     }
 }
 
-console.log('🚀 Iniciando seedRedditThread (versión 2.16 - Limpiado y separado CITIES)...');
+console.log('🚀 Iniciando seedRedditThreadComments (versión 2.20 - GeoStats solo para likes/comments/replies)...');
 seedRedditThread();
