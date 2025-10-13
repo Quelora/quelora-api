@@ -1,4 +1,3 @@
-// USO: CID="QU-ME7HF2BN-E8QD9" REDDIT_URL="..." node SeedRedditThreadComments.js
 // SeedRedditThreadComments.js - Versión 2.20 (FINAL: Elimina 'hit', Registra Comments/Replies/Likes Agregados y Desagregados)
 
 require('dotenv').config({ path: '../.env' });
@@ -11,7 +10,7 @@ const ProfileComment = require('../models/ProfileComment');
 const ProfileLike = require('../models/ProfileLike');
 const crypto = require('crypto');
 const axios = require('axios');
-const cheerio = require('cheerio');
+
 const { recordGeoActivity, recordActivityHit } = require('../utils/recordStatsActivity'); 
 
 const { CITIES } = require('./config/geoData');
@@ -32,6 +31,16 @@ const MORE_COMMENTS_BATCH_SIZE = 100;
 
 let accessToken = null;
 let US_CITIES_FILTERED = null;
+
+// DEFINICIÓN DE PAÍSES IMPORTANTES
+const IMPORTANT_COUNTRIES = new Set([
+    // América
+    'US', 'CA', 'MX', 'BR', 'AR', 'CO', 'CL', 'PE',
+    // Europa
+    'DE', 'FR', 'GB', 'ES', 'IT', 'NL', 'RU', 'PL',
+    // Asia
+    'CN', 'IN', 'JP', 'KR', 'ID', 'SA', 'TR', 'AE' 
+]);
 
 async function getRedditAccessToken() {
     try {
@@ -167,6 +176,22 @@ function findRedditThreadId(url) {
     return threadMatch[1];
 }
 
+// Lógica de filtrado y cacheo de ciudades importantes
+function getFilteredCities() {
+    if (!US_CITIES_FILTERED) {
+        // CAMBIO CLAVE: Filtrar ciudades cuyo countryCode esté incluido en la lista IMPORTANT_COUNTRIES
+        US_CITIES_FILTERED = CITIES.filter(city => IMPORTANT_COUNTRIES.has(city.countryCode));
+        
+        if (US_CITIES_FILTERED.length === 0) {
+            console.error('❌ No hay ciudades de los países importantes filtrados. Usando la lista completa.');
+            US_CITIES_FILTERED = CITIES;
+        } else {
+            console.log(`🌍 Filtrado de ciudades: Cargadas ${US_CITIES_FILTERED.length} ciudades de los países importantes.`);
+        }
+    }
+    return US_CITIES_FILTERED;
+}
+
 async function getOrCreateProfile(redditAuthor) {
     if (authorToNameMap.has(redditAuthor)) {
         const validName = authorToNameMap.get(redditAuthor);
@@ -184,15 +209,15 @@ async function getOrCreateProfile(redditAuthor) {
     uniqueAuthors.add(redditAuthor);
     authorToNameMap.set(redditAuthor, validName);
     
-    if (!US_CITIES_FILTERED) {
-        US_CITIES_FILTERED = CITIES.filter(city => city.countryCode === 'US');
-        if (US_CITIES_FILTERED.length === 0) {
-            console.error('❌ No hay ciudades de US en CITIES config. Usando la lista completa.');
-            US_CITIES_FILTERED = CITIES;
-        }
-    }
+    // Usamos la función de filtrado
+    const filteredCities = getFilteredCities();
+    
+    if (filteredCities.length === 0) {
+        console.error('❌ No hay ciudades disponibles para la simulación de ubicación.');
+        return null;
+    }
 
-    const cityData = US_CITIES_FILTERED[Math.floor(Math.random() * US_CITIES_FILTERED.length)];
+    const cityData = filteredCities[Math.floor(Math.random() * filteredCities.length)];
     const coordinates = generateRandomCoords(cityData.coords);
 
     const profileData = {
@@ -410,6 +435,9 @@ async function seedRedditThread() {
 
         await connectDB();
         console.log('✅ Conexión a DB establecida');
+        
+        // Inicializa el filtro de ciudades para el proceso
+        getFilteredCities();
         
         console.log('👤 Obteniendo IDs, Autores, CID y Ubicación de perfiles para simulación (Carga única)...');
         // CARGA ÚNICA DE TODOS LOS PERFILES PARA EVITAR CONSULTAS EN EL BUCLE RECURSIVO
