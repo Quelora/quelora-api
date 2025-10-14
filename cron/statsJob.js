@@ -3,7 +3,7 @@ const cron = require('node-cron');
 const { saveStats, saveGeoStats, savePostViews, saveGeoPostStats } = require('../services/statsService');
 
 
-// Ejecutar el job cada 10 segundos
+// Ejecutar el job cada 5 minutos
 cron.schedule('0 */1 * * * *', async () => {
   console.log('⏲️  Running statistics job');
   await saveStats();
