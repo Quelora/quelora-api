@@ -4,7 +4,7 @@ const { saveStats, saveGeoStats, savePostViews, saveGeoPostStats } = require('..
 
 
 // Ejecutar el job cada 5 minutos
-cron.schedule('0 */1 * * * *', async () => {
+cron.schedule('0 */5 * * * *', async () => {
   console.log('⏲️  Running statistics job');
   await saveStats();
   await savePostViews();

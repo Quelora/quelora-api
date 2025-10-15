@@ -164,7 +164,7 @@ exports.searchGeoStats = async (req, res, next) => {
             });
         }
 
-        const { cid, dateFrom, dateTo } = req.query;
+        const { cid, dateFrom, dateTo, action } = req.query;
 
         let cidsToUse = [];
         if (cid) {
@@ -182,11 +182,19 @@ exports.searchGeoStats = async (req, res, next) => {
 
         const { dateFrom: from, dateTo: to } = getValidDateRange(dateFrom, dateTo);
         
+        let actionsToUse = [];
+        if (action) {
+            actionsToUse = Array.isArray(action) ? action : action.split(',').map(a => a.trim());
+        } else {
+            actionsToUse = ['comment'];
+        }
+
         const matchFilter = {
-                cid: { $in: cidsToUse },
-                action: { $in: ['like', 'share', 'comment', 'reply','hit'] },
-                timestamp: { $gte: from, $lte: to }
+            cid: { $in: cidsToUse },
+            action: { $in: actionsToUse }, 
+            timestamp: { $gte: from, $lte: to }
         };
+        // ------------------------------------------------------------------
 
         const results = await GeoStats.aggregate([
             {
@@ -241,7 +249,8 @@ exports.searchGeoStats = async (req, res, next) => {
                 from: from.toISOString(),
                 to: to.toISOString()
             },
-            cids: cidsToUse
+            cids: cidsToUse,
+            actions: actionsToUse
         });
 
     } catch (error) {
