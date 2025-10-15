@@ -1,6 +1,6 @@
 // SeedRedditCommentsCoordinator.js - Coordinador de importación de comentarios
 // USO: node SeedRedditCommentsCoordinator.js
-// node SeedRedditCommentsCoordinator.js --scheduled
+// node SeedRedditCommentsCoordinator.js --scheduled &
 
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');

@@ -1,5 +1,5 @@
 // SeedRedditThread.js - Versión 2.20 (FINAL: Elimina 'hit', Registra Likes Agregados y Desagregados)
-// node SeedRedditThread.js --scheduled
+// node SeedRedditThread.js --scheduled &
 require('dotenv').config({ path: '../.env' });
 const mongoose = require('mongoose');
 const connectDB = require('../db');

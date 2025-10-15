@@ -35,13 +35,52 @@ let US_CITIES_FILTERED = null;
 
 // DEFINICIÓN DE PAÍSES IMPORTANTES
 const IMPORTANT_COUNTRIES = new Set([
-    // América
-    'US', 'CA', 'MX', 'BR', 'AR', 'CO', 'CL', 'PE',
-    // Europa
-    'DE', 'FR', 'GB', 'ES', 'IT', 'NL', 'RU', 'PL',
-    // Asia
-    'CN', 'IN', 'JP', 'KR', 'ID', 'SA', 'TR', 'AE' 
+  // 🌎 América del Norte
+  'US', 'CA', 'MX',
+
+  // 🌎 América Central
+  'BZ', 'CR', 'SV', 'GT', 'HN', 'NI', 'PA',
+
+  // 🌎 Caribe
+  'AG', 'BS', 'BB', 'CU', 'DM', 'DO', 'GD', 'HT', 'JM', 'KN', 'LC', 'VC', 'TT',
+
+  // 🌎 América del Sur
+  'AR', 'BO', 'BR', 'CL', 'CO', 'EC', 'GY', 'PY', 'PE', 'SR', 'UY', 'VE',
+
+  // 🌍 Europa Occidental
+  'AT', 'BE', 'FR', 'DE', 'LI', 'LU', 'MC', 'NL', 'CH',
+
+  // 🌍 Europa Septentrional
+  'DK', 'EE', 'FI', 'IS', 'IE', 'LV', 'LT', 'NO', 'SE', 'GB',
+
+  // 🌍 Europa Meridional
+  'AL', 'AD', 'BA', 'HR', 'GR', 'IT', 'MT', 'ME', 'MK', 'PT', 'SM', 'RS', 'SI', 'ES', 'VA',
+
+  // 🌍 Europa Oriental
+  'BG', 'BY', 'CZ', 'HU', 'MD', 'PL', 'RO', 'RU', 'SK', 'UA',
+
+  // 🌍 Cáucaso (a menudo considerado parte de Europa)
+  'AM', 'AZ', 'GE',
+
+  // 🌏 Asia (4 más importantes)
+  'CN', // China
+  'IN', // India
+  'JP', // Japón
+  'KR', // Corea del Sur
+
+  // 🌍 África (4 más importantes)
+  'ZA', // Sudáfrica
+  'EG', // Egipto
+  'NG', // Nigeria
+  'KE', // Kenia
+
+  // 🌏 Oceanía (4 más importantes)
+  'AU', // Australia
+  'NZ', // Nueva Zelanda
+  'PG', // Papúa Nueva Guinea
+  'FJ'  // Fiyi
 ]);
+
 
 async function getRedditAccessToken() {
     try {
